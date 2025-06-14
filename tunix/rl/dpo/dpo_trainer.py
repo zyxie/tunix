@@ -235,8 +235,13 @@ class DpoTrainer(peft_trainer.PeftTrainer):
     self.metrics_logger.log("rewards_margin", aux["rewards_margin"], m, s)
     self.metrics_logger.log("rewards_accuracy", aux["rewards_accuracy"], m, s)
 
-  # TODO(tsbao): override _post_process_eval_step once eval step is properly
-  # tracked.
+  @override
+  def _post_process_eval_step(self, aux: Any) -> None:
+    m, s = self._mode, self._eval_steps
+    self.metrics_logger.log("chosen_rewards", aux["chosen_rewards"], m, s)
+    self.metrics_logger.log("rejected_rewards", aux["rejected_rewards"], m, s)
+    self.metrics_logger.log("rewards_margin", aux["rewards_margin"], m, s)
+    self.metrics_logger.log("rewards_accuracy", aux["rewards_accuracy"], m, s)
 
 
 def dpo_loss_fn(
