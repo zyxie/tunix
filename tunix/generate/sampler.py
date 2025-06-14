@@ -37,58 +37,42 @@ import tunix.generate.tokenizer_adapter as tok_adapter
 LayerCache = dict[str, jaxtyping.Array]
 Cache = dict[str, LayerCache]
 
+# Constants
+_DEFAULT_TEMPERATURE = 0.0
+_SUPPORTED_SAMPLING_MODES = {'greedy', 'top_p', 'beam_search'}
+
+
+@flax.struct.dataclass
+class _BufferState:
+  """State for token and logits buffers."""
+  token_buffer: jnp.ndarray  # [B, L]
+  positions: jnp.ndarray  # [B, L]
+  logits_buffer: jnp.ndarray | None  # [B, L, V]
+
+
+@flax.struct.dataclass  
+class _SamplingConfig:
+  """Configuration for sampling behavior."""
+  sampling_mode: str = flax.struct.field(pytree_node=False)
+  temperature: float = flax.struct.field(pytree_node=False)
+  sampling_parameters: dict[str, float | int] = flax.struct.field(pytree_node=False)
+  forbidden_token_ids: Sequence[int] | None = flax.struct.field(pytree_node=False)
+  seed: jax.Array
+
 
 @flax.struct.dataclass
 class _SamplingState:
   """Internal sampling state."""
-
-  # Decoding step.
   decoding_step: jnp.int32
-
-  # Fixed-size buffer for accumulating the output tokens.
-  token_buffer: jnp.ndarray  # [B, L]
-
-  # Position indices, based on ignoring pad tokens.
-  positions: jnp.ndarray  # [B, L]
-
-  # Model state for conditioning the model on autoregressively.
-  cache: dict[str, dict[str, jaxtyping.Array]]
-
-  # Is decoding done on the given sequence?
-  done: jnp.ndarray  # [B]
-
-  # Total sampling steps (including the prompt).
-  total_sampling_steps: int
-
-  # Fixed-size buffer for accumulating the output logits.
-  logits_buffer: jnp.ndarray | None  # [B, L, V]
-
-  # List of tokens that are forbidden to be generated.
-  forbidden_token_ids: Sequence[int] | None
-
-  # Random seed for sampling.
-  seed: jax.Array
-
-  # The sampling mode to use, one of "greedy", "top_p" or "beam_search"
-  sampling_mode: str = flax.struct.field(pytree_node=False)
-
-  # Number of input tokens with padding.
   num_input_tokens: jnp.int32 = flax.struct.field(pytree_node=False)
-
-  # Tempurature for top_p sampling.
-  temperature: float = flax.struct.field(pytree_node=False)
-
-  # Sampling parameters.
-  # For top_p, it contains "top_p" and "top_k".
-  # For beam search, it contains "beam_size"
-  sampling_parameters: dict[str, float | int] = flax.struct.field(
-      pytree_node=False
-  )
-
-  # Only present when sampling_mode is "beam_search".
-  beam_search_sampling_state: (
-      beam_search_lib._BeamSearchSamplingState | None
-  ) = None
+  total_sampling_steps: int = flax.struct.field(pytree_node=False)
+  done: jnp.ndarray  # [B]
+  cache: dict[str, dict[str, jaxtyping.Array]]
+  
+  # Nested state objects
+  buffer_state: _BufferState
+  sampling_config: _SamplingConfig
+  beam_search_sampling_state: beam_search_lib._BeamSearchSamplingState | None = None
 
 
 @dataclasses.dataclass
@@ -295,56 +279,16 @@ class Sampler:
   def dtype(self) -> jnp.dtype:
     return self._flattened_transformer_state[0].dtype
 
-  def init_sample_state(
+  def _create_sampling_config(
       self,
-      all_input_ids: jax.Array,
-      total_sampling_steps: int,
-      include_logits: bool,
-      forbidden_token_ids: Sequence[int] | None,
       temperature: float,
       top_p: Optional[float],
       top_k: Optional[int],
-      seed: jax.Array,
       beam_size: Optional[int],
-  ) -> _SamplingState:
-    """Initializes the sampling state given input prompts."""
-    batch_size = all_input_ids.shape[0]
-    num_input_tokens = all_input_ids.shape[1]
-    buffer_size = total_sampling_steps + 1
-
-    token_buffer = jnp.full(
-        (
-            batch_size,
-            buffer_size,
-        ),
-        self.tokenizer.pad_id(),
-        dtype=jnp.int32,
-    )
-    input_mask = jnp.ones_like(token_buffer, dtype=jnp.bool_)
-    token_buffer = token_buffer.at[:, :num_input_tokens].set(all_input_ids)
-    input_mask = input_mask.at[:, :num_input_tokens].set(
-        all_input_ids != self.tokenizer.pad_id()
-    )
-    positions = utils.build_positions_from_mask(input_mask)
-
-    done = jnp.zeros((batch_size,), dtype=jnp.bool_)
-
-    cache = _init_cache(
-        n_layers=self.cache_config.num_layers,
-        cache_size=self.cache_config.cache_size,
-        batch_size=batch_size,
-        num_kv_heads=self.cache_config.num_kv_heads,
-        head_dim=self.cache_config.head_dim,
-        dtype=self.dtype,
-    )
-
-    if include_logits:
-      logits_buffer = jnp.zeros(
-          (batch_size, buffer_size, self.transformer.num_embed),
-          dtype=jnp.float32,
-      )
-    else:
-      logits_buffer = None
+      forbidden_token_ids: Sequence[int] | None,
+      seed: jax.Array,
+  ) -> _SamplingConfig:
+    """Creates sampling configuration."""
     sampling_parameters = {}
     sampling_mode = [None]
 
@@ -361,21 +305,88 @@ class Sampler:
       sampling_mode[0] = 'greedy'
 
     logging.debug('Using sampling mode: %s', sampling_mode[0])
+    
+    return _SamplingConfig(
+        sampling_mode=sampling_mode[0],
+        temperature=temperature,
+        sampling_parameters=sampling_parameters,
+        forbidden_token_ids=forbidden_token_ids,
+        seed=seed,
+    )
+
+  def _create_buffer_state(
+      self,
+      all_input_ids: jax.Array,
+      total_sampling_steps: int,
+      include_logits: bool,
+  ) -> _BufferState:
+    """Creates buffer state for tokens and logits."""
+    batch_size, num_input_tokens = all_input_ids.shape
+    buffer_size = total_sampling_steps + 1
+
+    token_buffer = jnp.full(
+        (batch_size, buffer_size),
+        self.tokenizer.pad_id(),
+        dtype=jnp.int32,
+    )
+    input_mask = jnp.ones_like(token_buffer, dtype=jnp.bool_)
+    token_buffer = token_buffer.at[:, :num_input_tokens].set(all_input_ids)
+    input_mask = input_mask.at[:, :num_input_tokens].set(
+        all_input_ids != self.tokenizer.pad_id()
+    )
+    positions = utils.build_positions_from_mask(input_mask)
+
+    logits_buffer = None
+    if include_logits:
+      logits_buffer = jnp.zeros(
+          (batch_size, buffer_size, self.transformer.num_embed),
+          dtype=jnp.float32,
+      )
+
+    return _BufferState(
+        token_buffer=token_buffer,
+        positions=positions,
+        logits_buffer=logits_buffer,
+    )
+
+  def init_sample_state(
+      self,
+      all_input_ids: jax.Array,
+      total_sampling_steps: int,
+      include_logits: bool,
+      forbidden_token_ids: Sequence[int] | None,
+      temperature: float,
+      top_p: Optional[float],
+      top_k: Optional[int],
+      seed: jax.Array,
+      beam_size: Optional[int],
+  ) -> _SamplingState:
+    """Initializes the sampling state given input prompts."""
+    batch_size, num_input_tokens = all_input_ids.shape
+
+    buffer_state = self._create_buffer_state(all_input_ids, total_sampling_steps, include_logits)
+    sampling_config = self._create_sampling_config(
+        temperature, top_p, top_k, beam_size, forbidden_token_ids, seed
+    )
+
+    done = jnp.zeros((batch_size,), dtype=jnp.bool_)
+    cache = _init_cache(
+        n_layers=self.cache_config.num_layers,
+        cache_size=self.cache_config.cache_size,
+        batch_size=batch_size,
+        num_kv_heads=self.cache_config.num_kv_heads,
+        head_dim=self.cache_config.head_dim,
+        dtype=self.dtype,
+    )
 
     return _SamplingState(
         decoding_step=num_input_tokens - 1,
         num_input_tokens=jnp.array(num_input_tokens, dtype=jnp.int32),
-        token_buffer=token_buffer,
-        positions=positions,
-        logits_buffer=logits_buffer,
-        cache=cache,
-        done=done,
         total_sampling_steps=total_sampling_steps,
-        forbidden_token_ids=forbidden_token_ids,
-        temperature=temperature,
-        sampling_parameters=sampling_parameters,
-        seed=seed,
-        sampling_mode=sampling_mode[0],
+        done=done,
+        cache=cache,
+        buffer_state=buffer_state,
+        sampling_config=sampling_config,
         beam_search_sampling_state=None,
     )
 
@@ -386,6 +397,33 @@ class Sampler:
     input_ids = jnp.array(bos_tok + input_ids, dtype=jnp.int32)
     return input_ids
 
+  def _apply_forbidden_tokens(self, logits: jnp.ndarray, forbidden_token_ids: Sequence[int] | None) -> jnp.ndarray:
+    """Applies forbidden token constraints to logits."""
+    if forbidden_token_ids:
+      logits = logits.at[:, :, forbidden_token_ids].set(-jnp.inf)
+    return logits
+
+  def _sample_token(
+      self,
+      logits: jnp.ndarray,
+      sampling_config: _SamplingConfig,
+      decoding_step: jnp.int32,
+  ) -> jnp.ndarray:
+    """Samples next token based on sampling configuration."""
+    if sampling_config.sampling_mode == 'greedy':
+      return sample_best(logits)
+    elif sampling_config.sampling_mode == 'top_p':
+      key = jax.random.fold_in(sampling_config.seed, decoding_step)
+      return sample_top_p(
+          logits,
+          key,
+          sampling_config.temperature,
+          sampling_config.sampling_parameters['top_p'],
+          sampling_config.sampling_parameters['top_k'],
+      )
+    else:
+      raise ValueError(f'Unsupported sampling mode: {sampling_config.sampling_mode}')
+
   def _sample(
       self,
       logits: jnp.ndarray,
@@ -394,17 +432,16 @@ class Sampler:
       sampler_state: _SamplingState,
   ) -> _SamplingState:
     """Samples a token from the logits."""
-
     logits = logits[:, -1][:, None, :]  # B, 1, V
+    logits = self._apply_forbidden_tokens(logits, sampler_state.sampling_config.forbidden_token_ids)
+    
     decoding_step = sampler_state.decoding_step
-    token_buffer = sampler_state.token_buffer
+    token_buffer = sampler_state.buffer_state.token_buffer
     done = sampler_state.done
-    logits_buffer = sampler_state.logits_buffer
+    logits_buffer = sampler_state.buffer_state.logits_buffer
     beam_search_state = sampler_state.beam_search_sampling_state
-    if sampler_state.forbidden_token_ids:
-      logits = logits.at[:, :, sampler_state.forbidden_token_ids].set(-jnp.inf)
 
-    if sampler_state.sampling_mode == 'beam_search':
+    if sampler_state.sampling_config.sampling_mode == 'beam_search':
       beam_search_state, updated_args = beam_search_lib.beam_search_step(
           logits=logits,
           done=done,
@@ -420,40 +457,25 @@ class Sampler:
       done = updated_args['done']
       logits_buffer = updated_args['logits_buffer']
     else:
-      if sampler_state.sampling_mode == 'greedy':
-        next_token_candidate = sample_best(logits)
-      elif sampler_state.sampling_mode == 'top_p':
-        key = jax.random.fold_in(sampler_state.seed, decoding_step)
-        next_token_candidate = sample_top_p(
-            logits,
-            key,
-            sampler_state.temperature,
-            sampler_state.sampling_parameters['top_p'],
-            sampler_state.sampling_parameters['top_k'],
-        )
-      else:
-        raise ValueError(
-            'Unsupported sampling mode: %s' % sampler_state.sampling_mode
-        )
-      token_buffer = token_buffer.at[:, decoding_step + 1].set(
-          next_token_candidate
-      )
+      next_token_candidate = self._sample_token(logits, sampler_state.sampling_config, decoding_step)
+      token_buffer = token_buffer.at[:, decoding_step + 1].set(next_token_candidate)
 
     done = done | jnp.equal(token_buffer[:, decoding_step + 1], eos)
-    return _SamplingState(
-        decoding_step=sampler_state.decoding_step + 1,
-        num_input_tokens=sampler_state.num_input_tokens,
+    
+    updated_buffer_state = _BufferState(
         token_buffer=token_buffer,
-        positions=sampler_state.positions,
+        positions=sampler_state.buffer_state.positions,
         logits_buffer=logits_buffer,
-        cache=cache,
-        done=done,
+    )
+    
+    return _SamplingState(
+        decoding_step=decoding_step + 1,
+        num_input_tokens=sampler_state.num_input_tokens,
         total_sampling_steps=sampler_state.total_sampling_steps,
-        forbidden_token_ids=sampler_state.forbidden_token_ids,
-        temperature=sampler_state.temperature,
-        sampling_parameters=sampler_state.sampling_parameters,
-        seed=sampler_state.seed,
-        sampling_mode=sampler_state.sampling_mode,
+        done=done,
+        cache=cache,
+        buffer_state=updated_buffer_state,
+        sampling_config=sampler_state.sampling_config,
         beam_search_sampling_state=beam_search_state,
     )
 
@@ -461,19 +483,19 @@ class Sampler:
       self, params: statelib.State, sampler_state: _SamplingState
   ) -> _SamplingState:
     """Performs prefill."""
-    batch_size = sampler_state.token_buffer.shape[0]
+    batch_size = sampler_state.buffer_state.token_buffer.shape[0]
 
     tokens = jax.lax.dynamic_slice(
-        sampler_state.token_buffer,
+        sampler_state.buffer_state.token_buffer,
         start_indices=jnp.zeros(
-            (sampler_state.token_buffer.ndim,), dtype=jnp.int32
+            (sampler_state.buffer_state.token_buffer.ndim,), dtype=jnp.int32
         ),
         slice_sizes=(batch_size, sampler_state.num_input_tokens),
     )
     step_positions = jax.lax.dynamic_slice(
-        sampler_state.positions,
+        sampler_state.buffer_state.positions,
         start_indices=jnp.zeros(
-            (sampler_state.token_buffer.ndim,), dtype=jnp.int32
+            (sampler_state.buffer_state.token_buffer.ndim,), dtype=jnp.int32
         ),
         slice_sizes=(batch_size, sampler_state.num_input_tokens),
     )
@@ -490,31 +512,31 @@ class Sampler:
         sampler_state.cache,
         attention_mask,
     )
-    token_buffer = sampler_state.token_buffer
+    token_buffer = sampler_state.buffer_state.token_buffer
     done = sampler_state.done
-    positions = sampler_state.positions
+    positions = sampler_state.buffer_state.positions
     beam_search_sampling_state = None
-    if sampler_state.logits_buffer is not None:
+    if sampler_state.buffer_state.logits_buffer is not None:
       logits_buffer = jax.lax.dynamic_update_slice(
-          sampler_state.logits_buffer,
-          logits.astype(sampler_state.logits_buffer.dtype),
+          sampler_state.buffer_state.logits_buffer,
+          logits.astype(sampler_state.buffer_state.logits_buffer.dtype),
           (0, 1, 0),
       )
     else:
-      logits_buffer = sampler_state.logits_buffer
+      logits_buffer = sampler_state.buffer_state.logits_buffer
 
-    if sampler_state.sampling_mode == 'beam_search':
+    if sampler_state.sampling_config.sampling_mode == 'beam_search':
       # init beam state in prefill instead of init as one minor optimization
       # to avoid running unnecessary prefill for
       # duplicated input prompt per beam.
       sampling_state, updated_args = beam_search_lib.init_batched_beam_state(
           logits=logits,
-          input_token_buffer=sampler_state.token_buffer,
+          input_token_buffer=sampler_state.buffer_state.token_buffer,
           initial_cache=cache,
           done=sampler_state.done,
-          positions=sampler_state.positions,
-          logits_buffer=sampler_state.logits_buffer,
-          beam_size=int(sampler_state.sampling_parameters['beam_size']),
+          positions=sampler_state.buffer_state.positions,
+          logits_buffer=sampler_state.buffer_state.logits_buffer,
+          beam_size=int(sampler_state.sampling_config.sampling_parameters['beam_size']),
       )
       beam_search_sampling_state = sampling_state
       logits = updated_args['logits']
@@ -524,20 +546,20 @@ class Sampler:
       positions = updated_args['positions']
       logits_buffer = updated_args['logits_buffer']
 
-    updated_sampling_state = _SamplingState(
-        decoding_step=sampler_state.decoding_step,
-        num_input_tokens=sampler_state.num_input_tokens,
+    updated_buffer_state = _BufferState(
         token_buffer=token_buffer,
         positions=positions,
         logits_buffer=logits_buffer,
-        cache=cache,
-        done=done,
+    )
+    
+    updated_sampling_state = _SamplingState(
+        decoding_step=sampler_state.decoding_step,
+        num_input_tokens=sampler_state.num_input_tokens,
         total_sampling_steps=sampler_state.total_sampling_steps,
-        forbidden_token_ids=sampler_state.forbidden_token_ids,
-        temperature=sampler_state.temperature,
-        sampling_parameters=sampler_state.sampling_parameters,
-        seed=sampler_state.seed,
-        sampling_mode=sampler_state.sampling_mode,
+        done=done,
+        cache=cache,
+        buffer_state=updated_buffer_state,
+        sampling_config=sampler_state.sampling_config,
         beam_search_sampling_state=beam_search_sampling_state,
     )
     updated_sampler_state = self._sample(
@@ -569,16 +591,16 @@ class Sampler:
       self, params: statelib.State, sampler_state: _SamplingState
   ) -> _SamplingState:
     """Performs a single sampling step."""
-    batch_size = sampler_state.token_buffer.shape[0]
+    batch_size = sampler_state.buffer_state.token_buffer.shape[0]
     decoding_step = sampler_state.decoding_step
 
-    last_token = sampler_state.token_buffer[:, decoding_step]
+    last_token = sampler_state.buffer_state.token_buffer[:, decoding_step]
     last_token = last_token.reshape((batch_size, 1))
     step_positions = jnp.expand_dims(
-        sampler_state.positions[:, decoding_step], -1
+        sampler_state.buffer_state.positions[:, decoding_step], -1
     )
 
-    input_mask = sampler_state.token_buffer == self.tokenizer.pad_id()
+    input_mask = sampler_state.buffer_state.token_buffer == self.tokenizer.pad_id()
     attention_mask = utils.compute_attention_masks(
         decoding_step, self.cache_config.cache_size, input_mask
     )
@@ -597,18 +619,19 @@ class Sampler:
         sampler_state=sampler_state,
     )
 
-    if updated_sampler_state.logits_buffer is not None:
+    if updated_sampler_state.buffer_state.logits_buffer is not None:
       next_logits = jnp.squeeze(logits, 1)
-      logits_buffer = updated_sampler_state.logits_buffer.at[
+      logits_buffer = updated_sampler_state.buffer_state.logits_buffer.at[
           :, decoding_step + 1
       ].set(next_logits)
-    else:
-      logits_buffer = None
-
-    updated_sampler_state = dataclasses.replace(
-        updated_sampler_state,
-        logits_buffer=logits_buffer,
-    )
+      updated_buffer_state = dataclasses.replace(
+          updated_sampler_state.buffer_state,
+          logits_buffer=logits_buffer,
+      )
+      updated_sampler_state = dataclasses.replace(
+          updated_sampler_state,
+          buffer_state=updated_buffer_state,
+      )
     return updated_sampler_state
 
   def __call__(
@@ -619,7 +642,7 @@ class Sampler:
       echo: bool = False,
       return_logits: bool = False,
       forbidden_tokens: Sequence[str] | None = None,
-      temperature: float = 0.0,
+      temperature: float = _DEFAULT_TEMPERATURE,
       top_p: Optional[float] = None,
       top_k: Optional[int] = None,
       beam_size: Optional[int] = None,
@@ -637,7 +660,7 @@ class Sampler:
         longest prompt in the batch.
       max_prompt_length: maximum length of the prompt. Specify to avoid
         recompilation on different prompt lengths.
-      echo: whgether to return the prompt as part of the output sample.
+      echo: whether to return the prompt as part of the output sample.
       return_logits: whether to return per-step logits used during generation.
       forbidden_tokens: list of tokens that are forbidden to be generated. Each
         token must map to a single token id in the vocab.
@@ -650,17 +673,8 @@ class Sampler:
     Returns:
       sampler_output: A SamplerOutput object containing the generated samples.
     """
-    forbidden_token_ids = None
-    if forbidden_tokens is not None:
-      forbidden_token_ids = []
-      for token in forbidden_tokens:
-        token_id = self.tokenizer.encode(token)
-        if len(token_id) != 1:
-          raise ValueError(
-              'Forbidden tokens must map to single token ids in the vocab.'
-          )
-        forbidden_token_ids.extend(token_id)
-      forbidden_token_ids = tuple(forbidden_token_ids)
+    self._validate_generation_params(total_generation_steps, temperature)
+    forbidden_token_ids = self._process_forbidden_tokens(forbidden_tokens)
 
     tokens = [self.tokenize(x) for x in input_strings]
     max_tokens_length = max(len(x) for x in tokens)
@@ -703,14 +717,14 @@ class Sampler:
         self._flattened_transformer_state, sampling_state
     )
 
-    token_buffers = sampling_state.token_buffer
-    logits_buffers = sampling_state.logits_buffer
+    token_buffers = sampling_state.buffer_state.token_buffer
+    logits_buffers = sampling_state.buffer_state.logits_buffer
 
-    if sampling_state.sampling_mode == 'beam_search':
+    if sampling_state.sampling_config.sampling_mode == 'beam_search':
       updated_args = beam_search_lib.finalize_beam_search_state(
           sampling_state.beam_search_sampling_state,
-          sampling_state.token_buffer,
-          sampling_state.logits_buffer,
+          sampling_state.buffer_state.token_buffer,
+          sampling_state.buffer_state.logits_buffer,
       )
       token_buffers = updated_args['token_buffer']
       logits_buffers = updated_args['logits_buffer']
@@ -748,3 +762,25 @@ class Sampler:
         padded_prompt_tokens=all_input_ids,
     )
     return result
+
+  def _validate_generation_params(self, total_generation_steps: int, temperature: float) -> None:
+    """Validates generation parameters."""
+    if total_generation_steps <= 0:
+      raise ValueError(f'total_generation_steps must be positive, got {total_generation_steps}')
+    if temperature < 0:
+      raise ValueError(f'temperature must be non-negative, got {temperature}')
+
+  def _process_forbidden_tokens(self, forbidden_tokens: Sequence[str] | None) -> tuple[int, ...] | None:
+    """Processes forbidden tokens into token IDs."""
+    if forbidden_tokens is None:
+      return None
+    
+    forbidden_token_ids = []
+    for token in forbidden_tokens:
+      token_id = self.tokenizer.encode(token)
+      if len(token_id) != 1:
+        raise ValueError(
+            'Forbidden tokens must map to single token ids in the vocab.'
+        )
+      forbidden_token_ids.extend(token_id)
+    return tuple(forbidden_token_ids)
