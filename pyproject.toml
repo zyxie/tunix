@@ -25,6 +25,10 @@ dependencies = [
   "sentencepiece",
   "tensorboardX",
   "tqdm",
+  "absl-py",
+  "optax",
+  "orbax-checkpoint",
+  "qwix @ git+https://github.com/google/qwix",
 ]
 
 [project.urls]
