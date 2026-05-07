@@ -39,9 +39,12 @@ rollout_micro_batch_size="${rollout_micro_batch_size:-8}"
 compute_logps_micro_batch_size="${compute_logps_micro_batch_size:-1}"
 
 num_generations="${num_generations:-4}"
-
+total_tpus="${total_tpus:-16}"
 train_mesh="${train_mesh:-(8,1)}"
 rollout_mesh="${rollout_mesh:-(1,8)}"
+
+source "$(dirname "$0")/../../../tpu_utils.sh"
+validate_mesh_allocation "$total_tpus" "$train_mesh" "$rollout_mesh" "null" || exit 1
 
 checkpoint_dir="${checkpoint_dir:-gs://tunix/rl/checkpoints/gsm8k/qwen3/01}"
 checkpoint_suffix="${checkpoint_suffix:-$(printf '%04d' "$((RANDOM % 10000))")}"
