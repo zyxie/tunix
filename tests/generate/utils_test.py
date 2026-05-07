@@ -41,7 +41,9 @@ class MockState:
   def from_flat_path(self, flat_path):
     new_params = {}
     for keys, param in flat_path:
-      new_params[".".join(keys)] = param.value
+      new_params[".".join(keys)] = (
+          param if hasattr(param, "value") else MockParam(param)
+      )
     return MockState(new_params)
 
 
@@ -49,6 +51,31 @@ class MockParam:
 
   def __init__(self, value):
     self.value = value
+
+  @property
+  def shape(self):
+    return self.value.shape
+
+  @property
+  def dtype(self):
+    return self.value.dtype
+
+  @property
+  def ndim(self):
+    return self.value.ndim
+
+  @property
+  def sharding(self):
+    return self.value.sharding
+
+  def __getitem__(self, item):
+    return self.value[item]
+
+  def __array__(self, dtype=None):
+    return np.asarray(self.value, dtype=dtype)
+
+  def __jax_array__(self):
+    return self.value
 
 
 class Logprob:
@@ -229,14 +256,14 @@ class UtilsTest(parameterized.TestCase):
     expected_layer_0_weight = jnp.arange(16).reshape(2, 8).T * 2
     self.assertTrue(
         jnp.array_equal(
-            new_tgt_state.params["decoder.layer_0.weight"],
+            new_tgt_state.params["decoder.layer_0.weight"].value,
             expected_layer_0_weight,
         )
     )
     expected_layer_1_weight = jnp.arange(16, 32).reshape(2, 8).T
     self.assertTrue(
         jnp.array_equal(
-            new_tgt_state.params["encoder.layer_0.weight"],
+            new_tgt_state.params["encoder.layer_0.weight"].value,
             expected_layer_1_weight,
         )
     )
@@ -297,7 +324,7 @@ class UtilsTest(parameterized.TestCase):
     # Verify shape
     self.assertEqual(result.params[src_key].shape, (4, 128))
     # Verify values are repeated correctly
-    self.assertTrue(jnp.allclose(result.params[src_key], 1.0))
+    self.assertTrue(jnp.allclose(result.params[src_key].value, 1.0))
 
   def test_transfer_state_with_scanned_layers(self):
     """Comprehensive test for scanned layers covering multiple scenarios."""
@@ -400,7 +427,7 @@ class UtilsTest(parameterized.TestCase):
       self.assertEqual(transferred.shape, (vocab_size, embed_dim))
       self.assertTrue(
           jnp.allclose(
-              transferred,
+              transferred.value,
               jnp.full(
                   (vocab_size, embed_dim), layer_idx + 1, dtype=jnp.float32
               ),
@@ -420,7 +447,7 @@ class UtilsTest(parameterized.TestCase):
 
       self.assertEqual(transferred.shape, (batch_size, vocab_size))
       self.assertTrue(
-          jnp.allclose(transferred, expected),
+          jnp.allclose(transferred.value, expected),
           f"Scanned bias layer {layer_idx} mismatch",
       )
 
@@ -430,10 +457,94 @@ class UtilsTest(parameterized.TestCase):
     self.assertEqual(transferred_embedding.shape, (embed_dim, vocab_size))
     self.assertTrue(
         jnp.allclose(
-            transferred_embedding,
+            transferred_embedding.value,
             jnp.full((embed_dim, vocab_size), 99.0, dtype=jnp.float32),
         ),
         "Regular parameter with transpose mismatch",
+    )
+
+  def test_transfer_state_with_mappings_gemma4(self):
+    """Test transfer_state_with_mappings for Gemma4."""
+    from tunix.models.gemma4.mapping_vllm_jax import VLLM_JAX_MAPPING
+
+    # Mock source state (Tunix style)
+    src_params = {
+        "layers.0.attn.kv_einsum.w": MockParam(
+            jnp.arange(2 * 2 * 16 * 8, dtype=jnp.float32).reshape(2, 2, 16, 8)
+        ),
+        "layers.0.moe.gating_einsum": MockParam(
+            jnp.arange(4 * 2 * 8 * 16, dtype=jnp.float32).reshape(4, 2, 8, 16)
+        ),
+        "layers.0.moe.linear": MockParam(
+            jnp.arange(4 * 16 * 8, dtype=jnp.float32).reshape(4, 16, 8)
+        ),
+    }
+    src_state = MockState(src_params)
+
+    # Mock destination state (vLLM Jax backend style)
+    dst_params = {
+        "model.layers.0.self_attn.k_proj.weight": MockParam(
+            jnp.zeros((16, 2, 8), dtype=jnp.float32)
+        ),
+        "model.layers.0.self_attn.v_proj.weight": MockParam(
+            jnp.zeros((16, 2, 8), dtype=jnp.float32)
+        ),
+        "model.layers.0.experts.kernel_gating_upproj_EDF": MockParam(
+            jnp.zeros((4, 2, 8, 16), dtype=jnp.float32)
+        ),
+        "model.layers.0.experts.kernel_down_proj_EFD": MockParam(
+            jnp.zeros((4, 16, 8), dtype=jnp.float32)
+        ),
+    }
+    dst_state = MockState(dst_params)
+
+    # Apply preprocessing if it exists in mapping
+    if 'preprocess_src_state' in VLLM_JAX_MAPPING:
+      src_state = VLLM_JAX_MAPPING['preprocess_src_state'](src_state)
+
+    key_mappings = VLLM_JAX_MAPPING['to_hf_mappings']
+    transpose_keys = VLLM_JAX_MAPPING['to_hf_transpose_keys']
+
+    new_tgt_state = utils.transfer_state_with_mappings(
+        src_state,
+        dst_state,
+        key_mappings=key_mappings,
+        transpose_keys=transpose_keys,
+    )
+
+    # Assertions
+    src_val = jnp.arange(2 * 2 * 16 * 8, dtype=jnp.float32).reshape(2, 2, 16, 8)
+    k_val_src = src_val[0]
+    v_val_src = src_val[1]
+
+    expected_k = jnp.transpose(k_val_src, (1, 0, 2))
+    expected_v = jnp.transpose(v_val_src, (1, 0, 2))
+
+    self.assertTrue(
+        jnp.array_equal(
+            new_tgt_state.params["model.layers.0.self_attn.k_proj.weight"],
+            expected_k,
+        )
+    )
+    self.assertTrue(
+        jnp.array_equal(
+            new_tgt_state.params["model.layers.0.self_attn.v_proj.weight"],
+            expected_v,
+        )
+    )
+
+    self.assertTrue(
+        jnp.array_equal(
+            new_tgt_state.params["model.layers.0.experts.kernel_gating_upproj_EDF"],
+            src_params["layers.0.moe.gating_einsum"].value,
+        )
+    )
+
+    self.assertTrue(
+        jnp.array_equal(
+            new_tgt_state.params["model.layers.0.experts.kernel_down_proj_EFD"],
+            src_params["layers.0.moe.linear"].value,
+        )
     )
 
   def test_verify_state_closeness(self):
@@ -1001,13 +1112,15 @@ class UtilsTest(parameterized.TestCase):
 
     self.assertTrue(
         jnp.allclose(
-            new_tgt_state.params["decoder.layer.0.weight"], expected_layer_0
+            new_tgt_state.params["decoder.layer.0.weight"].value,
+            expected_layer_0,
         ),
         "Interleaved layer 0 mismatch",
     )
     self.assertTrue(
         jnp.allclose(
-            new_tgt_state.params["decoder.layer.2.weight"], expected_layer_2
+            new_tgt_state.params["decoder.layer.2.weight"].value,
+            expected_layer_2,
         ),
         "Interleaved layer 2 mismatch",
     )
@@ -1015,14 +1128,14 @@ class UtilsTest(parameterized.TestCase):
     # Layers 1 and 3 should remain zero (not mapped)
     self.assertTrue(
         jnp.allclose(
-            new_tgt_state.params["decoder.layer.1.weight"],
+            new_tgt_state.params["decoder.layer.1.weight"].value,
             jnp.zeros((vocab_size, embed_dim), dtype=jnp.float32),
         ),
         "Non-interleaved layer 1 should be zero",
     )
     self.assertTrue(
         jnp.allclose(
-            new_tgt_state.params["decoder.layer.3.weight"],
+            new_tgt_state.params["decoder.layer.3.weight"].value,
             jnp.zeros((vocab_size, embed_dim), dtype=jnp.float32),
         ),
         "Non-interleaved layer 3 should be zero",
@@ -1401,21 +1514,20 @@ class UtilsTest(parameterized.TestCase):
 
     self.assertEqual(result.params[src_key].shape, (1024,))
     expected = jnp.tile(src_k_bias, 8)
-    self.assertTrue(jnp.allclose(result.params[src_key], expected))
-
+    self.assertTrue(jnp.allclose(result.params[src_key].value, expected))
 
   def test_transfer_state_directly_fuses_moe_weights(self):
     """Tests that wi_0 and wi_1 are fused into wi when target expects it."""
     wi_0_val = jnp.array([[1.0, 2.0], [5.0, 6.0]], dtype=jnp.float32)
     wi_1_val = jnp.array([[3.0, 4.0], [7.0, 8.0]], dtype=jnp.float32)
-    
+
     src_state = nnx.Dict(
         layers=nnx.Dict(
             wi_0=nnx.Param(wi_0_val),
             wi_1=nnx.Param(wi_1_val),
         )
     )
-    
+
     dst_state = nnx.Dict(
         layers=nnx.Dict(
             wi=nnx.Param(jnp.zeros((2, 4), dtype=jnp.float32))
@@ -1604,7 +1716,6 @@ class UtilsTest(parameterized.TestCase):
     np.testing.assert_array_equal(
         dst_state['layers_1']['weight'][...], scanned[1]
     )
-
 
   def test_transfer_state_directly_fuses_moe_weights_with_padding(self):
     """Tests that wi_0 and wi_1 are fused, padded and interleaved into wi."""

@@ -363,6 +363,7 @@ def build_flat_dict(
     compiled_mappings.append((src, re.compile(pattern), sharding))
 
   # ITERATE THROUGH ACTUAL PARAMETERS
+  unmapped_paths = []
   for keys, v in flat_state:
     # Convert key tuple ('model', 'layers', '0') to string 'model.layers.0'
     path = '.'.join(str(key) for key in keys)
@@ -404,7 +405,10 @@ def build_flat_dict(
         break
     # There are no mappings for rng related params.
     if not mapped:
-      logging.warning('!!! No mapping for flat state: %s', path)
+      unmapped_paths.append(path)
+
+  if unmapped_paths:
+    logging.warning('!!! No mapping for flat states: %s', unmapped_paths)
 
   # Sort layers based on layer index to ensure correct order.
   for key, (layers, paths, sharding) in new_flat_dict.items():
@@ -507,6 +511,13 @@ def _apply_transpose(
     target_key = last_key
   elif all_key in transpose_keys and 'lora' not in all_key:
     target_key = all_key
+  else:
+    for k, _ in transpose_keys.items():
+      if '*' in k:
+        pattern = '^' + re.escape(k).replace('\\*', '.*') + '$'
+        if re.match(pattern, all_key):
+          target_key = k
+          break
   if target_key != '':
     logging.debug('Applying transpose on %s', src_key)
     return jnp.transpose(val, transpose_keys[target_key])
@@ -519,7 +530,6 @@ def _apply_transpose(
       if re.compile(rf'{r_key}').match(all_key):
         logging.debug('Applying LoRA transpose on %s', src_key)
         return jnp.transpose(val[None, :, :], transpose_keys[r_key])
-
   return val
 
 
@@ -617,6 +627,22 @@ def _align_shape(
           padded_dim = (val.shape[-1] + 127) // 128 * 128
           repeated_dim = tgt_shape[-1] // padded_dim
           new_tgt_shape = tgt_shape[:-1] + (repeated_dim, padded_dim)
+    elif re.compile(r'layers\..*\.moe\.gating_einsum').match(src_key):
+      tp_size = kwargs['tp_size']
+      num_experts, expert_dim, embed_dim = val.shape[0], val.shape[2], val.shape[3]
+      gate_chunks, up_chunks = val[:, 0, :, :], val[:, 1, :, :]
+      chunk_size = expert_dim // tp_size
+      padded_expert_chunk_dim = ((chunk_size + 127)//128)*128
+      pad_amount = padded_expert_chunk_dim - chunk_size
+      gate_chunks = gate_chunks.reshape(num_experts, tp_size, -1, embed_dim)
+      up_chunks = up_chunks.reshape(num_experts, tp_size, -1, embed_dim)
+      if pad_amount > 0:
+        gate_chunks = jnp.pad(gate_chunks, ((0, 0), (0, 0), (0, pad_amount), (0, 0)))
+        up_chunks = jnp.pad(up_chunks, ((0, 0), (0, 0), (0, pad_amount), (0, 0)))
+      val_chunks = jnp.stack([gate_chunks, up_chunks], axis=2)
+      val_chunks = val_chunks.reshape(num_experts, -1, embed_dim)
+      val_chunks = val_chunks.transpose(0, 2, 1)
+      return val_chunks
     else:
       raise ShapeMismatchError(
           f'Rank mismatch for {src_key}: {val.shape} vs {tgt_shape}'
@@ -741,9 +767,10 @@ def _sync_tied_lm_head_if_needed(
   embed_param = None
   lm_head_param = None
   for flat_key, tgt_param in tgt_flat_list:
-    if flat_key[-1:] == ('embedding',):
+    path = '.'.join(str(k) for k in flat_key)
+    if path.endswith(('embedding', 'embed_tokens.weight')):
       embed_param = tgt_param
-    elif flat_key[-1:] == ('lm_head',):
+    elif path.endswith(('lm_head', 'lm_head.weight')):
       lm_head_param = tgt_param
 
   if embed_param is None or lm_head_param is None:

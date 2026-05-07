@@ -190,12 +190,15 @@ class VllmSampler(base_sampler.BaseSampler):  # pylint: disable=invalid-name
     elif self._driver is not None:
       self._driver.llm_engine.reset_prefix_cache()
       self._driver.llm_engine.collective_rpc("delete_kv_cache")
-    
+
     # Synchronization point before weight sync
     jax.effects_barrier()
 
     if self.to_hf_key_mappings:
-      # Mapped Weight Sync (e.g. Vanilla -> vLLM)
+      preprocess_fn = self.config.mapping_config.preprocess_src_state
+      if preprocess_fn:
+        updated_weights = preprocess_fn(updated_weights)
+
       utils.transfer_state_with_mappings(
           src_state=updated_weights,
           dst_state=self.transformer_state,
@@ -213,6 +216,7 @@ class VllmSampler(base_sampler.BaseSampler):  # pylint: disable=invalid-name
               if not self._model_runner
               else self._model_runner.model_config.get_head_size()
           ),
+          tp_size=self.args.get("tensor_parallel_size", 1),
       )
     else:
       # Direct Weight Sync (e.g. MaxText -> MaxText)
@@ -237,7 +241,7 @@ class VllmSampler(base_sampler.BaseSampler):  # pylint: disable=invalid-name
           delete_dst_buffers=True,  # Ensure old weights are deleted to free up HBM memory
           reshard_chunk_size=self.config.reshard_chunk_size,
       )
-    
+
     if self.llm is not None:
       self.llm.collective_rpc("reinitialize_kv_cache")
     elif self._driver is not None:
