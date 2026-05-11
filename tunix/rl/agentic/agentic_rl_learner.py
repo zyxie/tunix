@@ -47,7 +47,7 @@ from tunix.rl.agentic.agents import model_agent
 from tunix.rl.agentic.environments import base_environment
 from tunix.rl.agentic.environments import task_environment
 from tunix.rl.agentic.pipeline import rollout_orchestrator
-from tunix.rl.agentic.rewards import reward
+from tunix.rl.agentic.rewards import reward  # pylint: disable=unused-import
 from tunix.rl.agentic.trajectory import trajectory_collect_engine
 from tunix.rl.queue import data_queue as queue_lib
 from tunix.sft import utils as sft_utils

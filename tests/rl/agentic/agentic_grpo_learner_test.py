@@ -39,6 +39,7 @@ import numpy as np
 import optax
 import orbax.checkpoint as ocp
 from tunix.generate import tokenizer_adapter
+from tunix.rl import algo_core
 from tunix.rl import common as rl_common
 from tunix.rl import function_registry
 from tunix.rl import rl_cluster as rl_cluster_lib
@@ -1903,21 +1904,6 @@ class AgenticGrpoLearnerTest(parameterized.TestCase):
     self.assertEqual(
         decoded_completion.count("Assistant:"), 2
     )  # 3 turns but terminal env obs does not append generation msg
-
-  def test_compute_rloo_advantages(self):
-    rewards = jnp.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
-    advantages = agentic_grpo_learner.compute_rloo_advantages(
-        rewards, num_generations=3
-    )
-    expected_value = jnp.array([-1.5, 0.0, 1.5, -1.5, 0.0, 1.5])
-    np.testing.assert_allclose(advantages, expected_value)
-
-  def test_compute_rloo_advantages_low_generations(self):
-    rewards = jnp.array([1.0, 2.0])
-    advantages = agentic_grpo_learner.compute_rloo_advantages(
-        rewards, num_generations=1
-    )
-    np.testing.assert_allclose(advantages, jnp.zeros_like(rewards))
 
 
 if __name__ == "__main__":
