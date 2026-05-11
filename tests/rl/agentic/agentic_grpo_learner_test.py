@@ -230,6 +230,7 @@ class AgenticGrpoLearnerTest(parameterized.TestCase):
         self.algo_config = algo_config
         self.rl_cluster = mock.Mock()
         self.metric_fns = []
+        self._process_in_consumer = False
 
       def _create_micro_batch_iterator(self, iterator, batch_size):
         # The dataset batch size is 2, and we want to test micro-batching
@@ -405,6 +406,108 @@ class AgenticGrpoLearnerTest(parameterized.TestCase):
       # 16 examples are grouped into 16/2 = 8 batches for update_actor.
       self.assertGreater(mock_update_actor.call_count, mock_b2te.call_count)
       self.assertEqual(mock_update_actor.call_count, 8)
+
+  def test_compute_logps_micro_batch_size(self):
+    vocab = test_common.MockVocab()
+    tokenizer = tokenizer_adapter.TokenizerAdapter(vocab)
+    model = test_common.ToyTransformer(
+        config=test_common.ModelConfig(vocab_size=vocab.GetPieceSize()),
+        rngs=nnx.Rngs(0),
+    )
+    ref_model = test_common.ToyTransformer(
+        config=test_common.ModelConfig(vocab_size=vocab.GetPieceSize()),
+        rngs=nnx.Rngs(0),
+    )
+
+    mesh = pxla.thread_resources.env.physical_mesh
+    cluster_config = rl_cluster_lib.ClusterConfig(
+        role_to_mesh={
+            rl_cluster_lib.Role.ACTOR: mesh,
+            rl_cluster_lib.Role.REFERENCE: mesh,
+            rl_cluster_lib.Role.ROLLOUT: mesh,
+        },
+        rollout_engine="vanilla",
+        offload_to_cpu=False,
+        training_config=rl_cluster_lib.RLTrainingConfig(
+            actor_optimizer=optax.sgd(1e-3),
+            eval_every_n_steps=100,
+            max_steps=10,
+            mini_batch_size=2,
+            train_micro_batch_size=2,
+            compute_logps_micro_batch_size=2,
+        ),
+        rollout_config=base_rollout.RolloutConfig(
+            max_prompt_length=256,
+            max_tokens_to_generate=10,
+            return_logprobs=True,
+            kv_cache_size=1024,
+        ),
+    )
+    rl_cluster = rl_cluster_lib.RLCluster(
+        actor=model,
+        reference=ref_model,
+        tokenizer=tokenizer,
+        cluster_config=cluster_config,
+    )
+
+    grpo_config = agentic_grpo_learner.GRPOConfig(
+        num_generations=2,
+        num_iterations=2,
+        loss_algo="grpo",
+        max_response_length=10,
+    )
+    grpo_learner = agentic_grpo_learner.GRPOLearner(
+        rl_cluster=rl_cluster,
+        reward_fns=reward_fn_1,
+        algo_config=grpo_config,
+        metric_fns=[lambda **kwargs: {"test_metric": (1.0, np.mean)}],
+        chat_parser=MockChatParser(),
+    )
+
+    train_ds = _dummy_dataset(
+        MySource(data=["1", "2", "3", "4"], repeat=1), batch_size=4
+    )
+
+    with (
+        mock.patch.object(
+            grpo_learner,
+            "_batch_to_train_example",
+            wraps=grpo_learner._batch_to_train_example,
+        ) as mock_b2te,
+        mock.patch.object(
+            rl_cluster, "update_actor", wraps=rl_cluster.update_actor
+        ) as mock_update_actor,
+        mock.patch.object(
+            rl_cluster,
+            "generate",
+            side_effect=self._mock_generate,
+        ),
+        mock.patch.object(
+            rl_cluster,
+            "get_ref_per_token_logps",
+            wraps=rl_cluster.get_ref_per_token_logps,
+        ) as mock_get_ref,
+    ):
+      grpo_learner.train(train_ds)
+
+      # 4 prompts total, batched into groups of 2.
+      # So 2 full batches.
+      # In new flow, _producer puts raw groups.
+      # Consumer gets 2 groups (4 trajectories) at a time (since train_micro_batch_size=2).
+      # So _batch_to_train_example is called 2 times (once per full batch).
+      self.assertEqual(mock_b2te.call_count, 2)
+
+      # get_ref_per_token_logps is called inside _process_results.
+      # So it should also be called 2 times.
+      self.assertEqual(mock_get_ref.call_count, 2)
+
+      # Each call to get_ref_per_token_logps should receive 4 trajectories.
+      _, kwargs = mock_get_ref.call_args_list[0]
+      self.assertEqual(kwargs["prompt_tokens"].shape[0], 4)
+
+      # For each batch of 4 trajectories, it does 2 iterations.
+      # So update_actor should be called 2 * 2 = 4 times!
+      self.assertEqual(mock_update_actor.call_count, 4)
 
   @parameterized.parameters("grpo", "gspo-token")
   def test_grpo_loss_fn(self, loss_algo):

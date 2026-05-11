@@ -298,6 +298,7 @@ class GRPOLearner(agentic_rl_learner.AgenticRLLearner[TGrpoConfig]):
     eos_value = self.rl_cluster.rollout.eos_id()
     # Extract completions and tokens from the group of G results.
     completion_texts: List[str] = []
+    prompt_tokens_list: List[np.ndarray] = []
     completion_tokens_list: List[np.ndarray] = []
     completion_masks_list: List[np.ndarray] = []
     old_logprobs_list: List[np.ndarray] = []
@@ -318,6 +319,7 @@ class GRPOLearner(agentic_rl_learner.AgenticRLLearner[TGrpoConfig]):
       )
 
       completion_texts.append(assistant_text)
+      prompt_tokens_list.append(item.traj.get("prompt_tokens"))
       completion_tokens_list.append(item.traj.get("conversation_tokens"))
       completion_masks_list.append(item.traj.get("conversation_masks"))
       old_logprobs_list.append(item.traj.get("old_logprobs"))
@@ -332,9 +334,6 @@ class GRPOLearner(agentic_rl_learner.AgenticRLLearner[TGrpoConfig]):
       for traj in trajectories_to_log:
         self._trajectory_logger.log_item_async(traj)
 
-    # All results in a group share the same prompt.
-    prompt_tokens = trajectories[0].traj.get("prompt_tokens")
-
     # Pad all prompts and completions to consistent lengths.
     rollout_config = self.rl_cluster.cluster_config.rollout_config
     if isinstance(rollout_config, dict):
@@ -347,8 +346,8 @@ class GRPOLearner(agentic_rl_learner.AgenticRLLearner[TGrpoConfig]):
 
     max_response_length = self.algo_config.max_response_length
     clipped_completion_count = 0
-    for completion_tokens, completion_mask, old_logprobs in zip(
-        completion_tokens_list, completion_masks_list, old_logprobs_list
+    for prompt_tokens, completion_tokens, completion_mask, old_logprobs in zip(
+        prompt_tokens_list, completion_tokens_list, completion_masks_list, old_logprobs_list
     ):
       if (
           len(completion_tokens) >= max_response_length
@@ -441,12 +440,10 @@ class GRPOLearner(agentic_rl_learner.AgenticRLLearner[TGrpoConfig]):
     # Rewards & advantages
     # Prepare arguments for reward computation by forwarding all training inputs
     # except for prompts, which is passed explicitly.
-    original_input = trajectories[0].traj["original_input"]
-    original_inputs = rl_utils.merge_micro_batches(
-        [original_input] * self.algo_config.num_generations
-    )
+    original_inputs_list = [item.traj["original_input"] for item in trajectories]
+    original_inputs = rl_utils.merge_micro_batches(original_inputs_list)
 
-    prompt_token_len = len(prompt_tokens)
+    prompt_token_len = len(prompt_tokens_list[0])
     self.rl_cluster.buffer_metrics_async(
         {
             "generation/prompts/mean_length": (prompt_token_len, np.mean),

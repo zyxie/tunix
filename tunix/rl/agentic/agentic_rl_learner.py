@@ -220,6 +220,7 @@ class AgenticRLLearner(abc.ABC, Generic[TConfig]):
     self.policy_version = self.rl_cluster.global_steps
     self._rollout_sync_lock = agentic_utils.RolloutSyncLock()
     self._full_batch_size = 0
+    self._process_in_consumer: bool = False
 
     loop_queue = queue.Queue()
 
@@ -618,14 +619,18 @@ class AgenticRLLearner(abc.ABC, Generic[TConfig]):
           collect_mode="Token",
       ):
         try:
-          train_examples = self._batch_to_train_example(
-              batch_results=batch,
-              mode=rl_cluster_lib.Mode.TRAIN,
-          )
-          iterations = self.algo_config.num_iterations
-          for _ in range(iterations):
-            for train_example in train_examples:
-              train_data_queue.put(train_example)
+          if self._process_in_consumer:
+            # Put raw batch (list of trajectories) into queue.
+            # We put it once, and consumer will handle iterations.
+            train_data_queue.put(batch)
+          else:
+            train_examples = self._batch_to_train_example(
+                batch_results=batch,
+                mode=rl_cluster_lib.Mode.TRAIN,
+            )
+            for _ in range(self._num_iterations()):
+              for train_example in train_examples:
+                train_data_queue.put(train_example)
         except Exception as e:
           if not isinstance(e, RuntimeError):
             logging.exception(
@@ -692,7 +697,19 @@ class AgenticRLLearner(abc.ABC, Generic[TConfig]):
     # Rollout and compute_logps micro batch sizes have to be 1 since we only
     # process inidividual prompts.
     self._rollout_micro_batch_size = 1
-    self._compute_logps_micro_batch_size = 1
+
+    compute_logps_mb = self._training_config.compute_logps_micro_batch_size
+    self._process_in_consumer = False
+    if compute_logps_mb is not None and compute_logps_mb > 1:
+      if compute_logps_mb != train_micro_batch_size:
+        raise ValueError(
+            f"compute_logps_micro_batch_size ({compute_logps_mb}) must be"
+            f" equal to train_micro_batch_size ({train_micro_batch_size})"
+        )
+      self._process_in_consumer = True
+      self._compute_logps_micro_batch_size = compute_logps_mb
+    else:
+      self._compute_logps_micro_batch_size = 1
     for v, n in [
         (self._rollout_micro_batch_size, f"{self._rollout_micro_batch_size=}"),
         (
@@ -782,9 +799,19 @@ class AgenticRLLearner(abc.ABC, Generic[TConfig]):
       #   continue
       # train_micro_batch = filtered_train_micro_batch
 
-      merged_train_micro_batch = jax.tree.map(
-          lambda *xs: jnp.concatenate(xs, axis=0), *train_micro_batch
-      )
+      if self._process_in_consumer:
+        # train_micro_batch is a list of lists of trajectories.
+        all_trajectories = [t for group in train_micro_batch for t in group]
+        train_examples = self._batch_to_train_example(
+            batch_results=all_trajectories,
+            mode=rl_cluster_lib.Mode.TRAIN,
+        )
+        # GRPO returns a list with a single TrainExample.
+        merged_train_micro_batch = train_examples[0]
+      else:
+        merged_train_micro_batch = jax.tree.map(
+            lambda *xs: jnp.concatenate(xs, axis=0), *train_micro_batch
+        )
 
       # --- Evaluation Logic ---
       current_eval_dataset = None
@@ -819,13 +846,20 @@ class AgenticRLLearner(abc.ABC, Generic[TConfig]):
         current_eval_dataset = eval_examples
 
       # --- Training Step ---
-      self.rl_cluster.update_actor(
-          [merged_train_micro_batch], current_eval_dataset, skip_jit
-      )
-      if hasattr(self.rl_cluster, "critic_trainer"):
-        self.rl_cluster.update_critic(
+      iterations = self._num_iterations() if self._process_in_consumer else 1
+
+      for i in range(iterations):
+        if self._process_in_consumer and i > 0:
+          # TODO(b/483779605) Sub-step checkpointing.
+          self._iter_steps += 1
+
+        self.rl_cluster.update_actor(
             [merged_train_micro_batch], current_eval_dataset, skip_jit
         )
+        if hasattr(self.rl_cluster, "critic_trainer"):
+          self.rl_cluster.update_critic(
+              [merged_train_micro_batch], current_eval_dataset, skip_jit
+          )
 
       # --- Weight Sync Logic ---
       micro_batches_since_last_sync += 1
