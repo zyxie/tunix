@@ -31,6 +31,7 @@ class DummyLearner(agentic_rl_learner.AgenticRLLearner):
   def _process_results(self, **kwargs):
     return []
 
+
 class AgenticRLLearnerTest(parameterized.TestCase):
 
   def test_validate_rollout_config_mismatch_max_tokens(self):
@@ -46,6 +47,7 @@ class AgenticRLLearnerTest(parameterized.TestCase):
 
     algo_config = agentic_rl_learner.AgenticRLConfig(
         max_response_length=20,  # Mismatch: 10 != 20
+        use_rollout_logps=True,
     )
 
     with self.assertRaisesRegex(
@@ -70,6 +72,7 @@ class AgenticRLLearnerTest(parameterized.TestCase):
 
     algo_config = agentic_rl_learner.AgenticRLConfig(
         max_response_length=10,
+        use_rollout_logps=True,
     )
 
     with self.assertRaisesRegex(
@@ -102,6 +105,7 @@ class AgenticRLLearnerTest(parameterized.TestCase):
 
     algo_config = agentic_rl_learner.AgenticRLConfig(
         max_response_length=10,
+        use_rollout_logps=True,
     )
 
     with self.assertRaisesRegex(
@@ -127,6 +131,7 @@ class AgenticRLLearnerTest(parameterized.TestCase):
 
     algo_config = agentic_rl_learner.AgenticRLConfig(
         max_response_length=10,
+        use_rollout_logps=True,
     )
 
     with self.assertRaisesRegex(
