@@ -211,7 +211,7 @@ class AgenticRLLearner(abc.ABC, Generic[TConfig]):
         self._training_config.rollout_micro_batch_size
     )
     self._compute_logps_micro_batch_size = (
-        self._training_config.compute_logps_micro_batch_size
+        self._training_config.compute_logps_micro_batch_size or 1
     )
     sft_utils.show_hbm_usage(title="AgenticRLLearner init")
 
@@ -412,8 +412,6 @@ class AgenticRLLearner(abc.ABC, Generic[TConfig]):
           )
       if "pair_index" in env.extra_kwargs:
         tags[perf_constants.PAIR_INDEX] = env.extra_kwargs["pair_index"]
-
-
 
     result = self.rl_cluster.generate(
         prompts=chat_lists,
@@ -694,22 +692,20 @@ class AgenticRLLearner(abc.ABC, Generic[TConfig]):
     train_micro_batch_size = (
         self._training_config.train_micro_batch_size or mini_batch_size
     )
-    # Rollout and compute_logps micro batch sizes have to be 1 since we only
-    # process inidividual prompts.
+    # Rollout micro batch size has to be 1 since we only process individual
+    # prompts.
     self._rollout_micro_batch_size = 1
-
-    compute_logps_mb = self._training_config.compute_logps_micro_batch_size
     self._process_in_consumer = False
-    if compute_logps_mb is not None and compute_logps_mb > 1:
-      if compute_logps_mb != train_micro_batch_size:
+
+    if self._compute_logps_micro_batch_size > 1:
+      if self._compute_logps_micro_batch_size != train_micro_batch_size:
         raise ValueError(
-            f"compute_logps_micro_batch_size ({compute_logps_mb}) must be"
-            f" equal to train_micro_batch_size ({train_micro_batch_size})"
+            "compute_logps_micro_batch_size"
+            f" ({self._compute_logps_micro_batch_size}) must be equal to"
+            f" train_micro_batch_size ({train_micro_batch_size})"
         )
       self._process_in_consumer = True
-      self._compute_logps_micro_batch_size = compute_logps_mb
-    else:
-      self._compute_logps_micro_batch_size = 1
+
     for v, n in [
         (self._rollout_micro_batch_size, f"{self._rollout_micro_batch_size=}"),
         (
