@@ -18,6 +18,7 @@ import enum
 import gc
 import importlib
 import os
+import shutil
 from typing import Any
 from absl import logging
 from flax import nnx
@@ -222,13 +223,16 @@ def create_gemma_model_with_nnx_conversion(
       return _get_gemma_base_model(
           model_name, intermediate_ckpt_dir, rng_seed, mesh
       )
-    except (FileNotFoundError, ValueError, RuntimeError):
+    except Exception as e:  # pylint: disable=broad-exception-caught
+
       logging.warning(
-          'Failed to load from intermediate_ckpt_dir %s. '
-          'Falling back to NNX conversion.',
+          'Failed to load from intermediate_ckpt_dir %s: %s. '
+          'Purging directory and falling back to fresh NNX conversion.',
           intermediate_ckpt_dir,
+          e,
           exc_info=True,
       )
+      shutil.rmtree(intermediate_ckpt_dir, ignore_errors=True)
   return _nnx_convert_and_reload()
 
 

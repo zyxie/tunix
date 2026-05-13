@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import tempfile
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -80,7 +81,7 @@ class ModelIntegrationTest(parameterized.TestCase):
         "model_id": model_id,
         "model_path": model_path,
         "model_download_path": self.download_dir,
-        "intermediate_ckpt_dir": self.download_dir,
+        "intermediate_ckpt_dir": os.path.join(self.download_dir, "intermediate_ckpt"),
         "lora_config": None,
         "model_display": False,
     }
