@@ -48,9 +48,37 @@ def _get_all_models_test_parameters():
       ),
       dict(testcase_name="llama-3.2-3b", model_name="llama-3.2-3b"),
       dict(testcase_name="qwen2.5-0.5b", model_name="qwen2.5-0.5b"),
+      dict(
+          testcase_name="qwen2.5-0.5b-instruct",
+          model_name="qwen2.5-0.5b-instruct",
+      ),
+      dict(
+          testcase_name="qwen2.5-coder-0.5b",
+          model_name="qwen2.5-coder-0.5b",
+      ),
       dict(testcase_name="qwen2.5-1.5b", model_name="qwen2.5-1.5b"),
+      dict(
+          testcase_name="qwen2.5-1.5b-instruct",
+          model_name="qwen2.5-1.5b-instruct",
+      ),
       dict(testcase_name="qwen2.5-3b", model_name="qwen2.5-3b"),
+      dict(
+          testcase_name="qwen2.5-3b-instruct",
+          model_name="qwen2.5-3b-instruct",
+      ),
+      dict(
+          testcase_name="qwen2.5-coder-3b",
+          model_name="qwen2.5-coder-3b",
+      ),
       dict(testcase_name="qwen2.5-7b", model_name="qwen2.5-7b"),
+      dict(
+          testcase_name="qwen2.5-7b-instruct",
+          model_name="qwen2.5-7b-instruct",
+      ),
+      dict(
+          testcase_name="qwen2.5-coder-7b",
+          model_name="qwen2.5-coder-7b",
+      ),
       dict(testcase_name="qwen2.5-math-1.5b", model_name="qwen2.5-math-1.5b"),
       dict(
           testcase_name="deepseek-r1-distill-qwen-1.5b",
