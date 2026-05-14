@@ -41,7 +41,7 @@ RUN pip install -r /app/requirements/requirements.txt
 RUN pip install -r /app/requirements/special_requirements.txt
 
 # Tpu-inference pins qwix to 0.1.2 causing lora issues.
-RUN pip install qwix>=0.1.6
+RUN pip install --no-deps "qwix>=0.1.6"
 
 # Set the default command to bash
 CMD ["bash"]
