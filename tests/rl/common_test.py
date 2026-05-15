@@ -22,7 +22,7 @@ from tunix.rl import common
 from tunix.tests import test_common as tc
 
 jax.config.update("jax_threefry_partitionable", False)
-
+jax.config.update("jax_default_matmul_precision", "highest")
 
 class CommonTest(parameterized.TestCase):
 
@@ -274,7 +274,7 @@ class CommonTest(parameterized.TestCase):
     )
 
     np.testing.assert_allclose(
-        per_token_logps, expected_logps, atol=1e-1, rtol=1e-2
+        per_token_logps, expected_logps, atol=1e-4, rtol=1e-4
     )
 
     _, logits = common.compute_per_token_logps(
