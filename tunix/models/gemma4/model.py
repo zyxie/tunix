@@ -132,7 +132,6 @@ class ModelConfig:
   global_scale_factor: float = 1.0
 
   shd_config: ShardingConfig = ShardingConfig.get_default_sharding()
-  # TODO: support remat
   remat_config: RematConfig = RematConfig.NONE
   param_dtype: jnp.dtype = jnp.float32
   dtype: jnp.dtype = jnp.float32
@@ -821,9 +820,21 @@ class Attention(nnx.Module):
     return self.num_kv_heads != self.config.num_heads and self.num_kv_heads > 1
 
   def __call__(self, x, segment_pos, cache, attn_mask, kv_shared_cache=None):
-    return self.block(
-        x, segment_pos, cache, attn_mask, kv_shared_cache=kv_shared_cache
-    )
+    remat_config = getattr(self.config, 'remat_config', RematConfig.NONE)
+    if (
+        remat_config == RematConfig.BLOCK
+        or remat_config == RematConfig.BLOCK.value
+    ):
+      # nnx.remat needs to be applied to the unbound function and take self
+      # as the first argument. graph_updates=False prevents TraceContextError
+      # when mutating params across jax transformation trace levels.
+      return nnx.remat(self.block.__func__, graph_updates=False)(
+          self, x, segment_pos, cache, attn_mask, kv_shared_cache
+      )
+    else:
+      return self.block(
+          x, segment_pos, cache, attn_mask, kv_shared_cache=kv_shared_cache
+      )
 
   def init_cache(self, batch_size, max_seq_len, dtype):
     return {
@@ -898,8 +909,18 @@ class FeedForward(nnx.Module):
         param_dtype=config.param_dtype,
     )
 
-  def __call__(self, x):
+  def block(self, x):
     return self.down_proj(nnx.gelu(self.gate_proj(x)) * self.up_proj(x))
+
+  def __call__(self, x):
+    remat_config = getattr(self.config, 'remat_config', RematConfig.NONE)
+    if (
+        remat_config == RematConfig.BLOCK
+        or remat_config == RematConfig.BLOCK.value
+    ):
+      return nnx.remat(self.block.__func__, graph_updates=False)(self, x)
+    else:
+      return self.block(x)
 
 
 class DecoderLayer(nnx.Module):
@@ -1008,7 +1029,7 @@ class DecoderLayer(nnx.Module):
 
     self.skip_scale = nnx.Param(jnp.ones((1,), dtype=config.param_dtype))
 
-  def __call__(
+  def block(
       self,
       x,
       segment_pos,
@@ -1046,6 +1067,34 @@ class DecoderLayer(nnx.Module):
 
     ffw = ffw * self.skip_scale.value
     return cache, ffw
+
+  def __call__(
+      self,
+      x,
+      segment_pos,
+      cache,
+      attn_mask,
+      per_layer_input=None,
+      kv_shared_cache=None,
+  ):
+    remat_config = getattr(self.config, 'remat_config', RematConfig.NONE)
+    if (
+        remat_config == RematConfig.DECODER
+        or remat_config == RematConfig.DECODER.value
+    ):
+      return nnx.remat(self.block.__func__, graph_updates=False)(
+          self,
+          x,
+          segment_pos,
+          cache,
+          attn_mask,
+          per_layer_input,
+          kv_shared_cache,
+      )
+    else:
+      return self.block(
+          x, segment_pos, cache, attn_mask, per_layer_input, kv_shared_cache
+      )
 
   def init_cache(self, batch_size, max_seq_len, dtype):
     return self.attn.init_cache(batch_size, max_seq_len, dtype)
