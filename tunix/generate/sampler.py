@@ -129,23 +129,21 @@ def sample_top_p(
     logp_sampled = jnp.squeeze(logp_sampled, axis=-1)
     return next_token, logp_sampled
 
-  probs = jax.nn.softmax(next_token_logits, axis=-1)
-  k = probs.shape[-1] if top_k is None else top_k
+  k = next_token_logits.shape[-1] if top_k is None else top_k
+  logits_sorted, indices = jax.lax.top_k(next_token_logits, k=k)
 
-  probs_sorted, indices = jax.lax.top_k(probs, k=k)
+  probs_sorted = jax.nn.softmax(logits_sorted, axis=-1)
   cumsum_probs = jnp.cumsum(probs_sorted, axis=-1)
   mask = cumsum_probs - probs_sorted > top_p
-  probs_sorted = jnp.where(mask, 0.0, probs_sorted)
-  probs_sorted /= jnp.sum(probs_sorted, axis=-1, keepdims=True)
+  logits_sorted = jnp.where(mask, -jnp.inf, logits_sorted)
 
-  next_token_idx = jax.random.categorical(key, logits=jnp.log(probs_sorted))
+  next_token_idx = jax.random.categorical(key, logits=logits_sorted)
   next_token = jnp.take_along_axis(indices, next_token_idx[..., None], axis=-1)
   next_token = jnp.squeeze(next_token, axis=-1)
 
   if return_logprobs:
-    logp_sampled = jnp.log(
-        jnp.take_along_axis(probs_sorted, next_token_idx[..., None], axis=-1)
-    )
+    logp = jax.nn.log_softmax(next_token_logits, axis=-1)
+    logp_sampled = jnp.take_along_axis(logp, next_token[..., None], axis=-1)
     logp_sampled = jnp.squeeze(logp_sampled, axis=-1)
   else:
     logp_sampled = None
@@ -932,4 +930,3 @@ class Sampler(base_sampler.BaseSampler):
         logprobs=out_logprobs if return_logprobs else None,
     )
     return result
-
