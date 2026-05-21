@@ -361,6 +361,7 @@ def create_model_from_safe_tensors(
     config: model_lib.ModelConfig,
     mesh: jax.sharding.Mesh | None = None,
     dtype: jnp.dtype | None = None,
+    mode: str = "auto",
 ):
   return safetensors_loader.load_and_create_model(
       file_dir=file_dir,
@@ -370,4 +371,5 @@ def create_model_from_safe_tensors(
       mesh=mesh,
       preprocess_fn=_make_preprocess_fn(config),
       dtype=dtype,
+      mode=mode,
   )

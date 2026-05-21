@@ -895,7 +895,8 @@ class Sampler(base_sampler.BaseSampler):
       out_tokens = []
       out_logits = []
       out_logprobs = []
-      for i, token_buffer in enumerate(token_buffers):
+      for i in range(len(token_buffers)):
+        token_buffer = token_buffers[i]
         start_idx = (
             utils.find_first_non_pad_idx(token_buffer, self.tokenizer.pad_id())
             if echo

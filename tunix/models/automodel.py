@@ -347,7 +347,9 @@ def create_model_from_safe_tensors(
       AttributeError: If create_model_from_safe_tensors is not in the module.
   """
   naming_info = naming.ModelNaming(model_name=model_name)
-  if naming_info.model_family in ('gemma', 'gemma1p1', 'gemma2', 'gemma3'):
+  if naming_info.model_family in (
+      'gemma', 'gemma1p1', 'gemma2', 'gemma3', 'gemma4'
+  ):
     params_module = get_model_module(model_name, ModelModule.PARAMS_SAFETENSORS)
   else:
     params_module = get_model_module(model_name, ModelModule.PARAMS)
