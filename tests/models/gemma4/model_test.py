@@ -80,6 +80,117 @@ class ModelTest(absltest.TestCase):
 
     self.assertEqual(logits.shape, (2, 32, config.num_embed))
 
+  def test_remat_block(self):
+    config = model_lib.ModelConfig.gemma4_e2b()
+    config.num_layers = 1
+    config.embed_dim = 256
+    config.hidden_dim = 512
+    config.num_heads = 4
+    config.head_dim = 64
+    config.num_kv_heads = 1
+    config.remat_config = model_lib.RematConfig.BLOCK
+
+    rngs = nnx.Rngs(0)
+    model = model_lib.Gemma4(config, rngs=rngs)
+
+    tokens = jax.random.randint(
+        jax.random.PRNGKey(0), (2, 32), 0, config.num_embed
+    )
+
+    positions = jnp.tile(
+        jnp.arange(tokens.shape[1])[None, :], (tokens.shape[0], 1)
+    )
+    attn_mask = jnp.tril(
+        jnp.ones((tokens.shape[1], tokens.shape[1]), dtype=jnp.bool_)
+    )[None, ...]
+
+    def loss_fn(model, tokens, positions, attn_mask):
+      logits, _ = model(tokens, positions=positions, attention_mask=attn_mask)
+      return jnp.sum(logits)
+
+    loss, grads = nnx.value_and_grad(loss_fn)(
+        model, tokens, positions, attn_mask
+    )
+    self.assertIsNotNone(loss)
+    self.assertIsNotNone(grads)
+
+  def test_remat_decoder(self):
+    config = model_lib.ModelConfig.gemma4_e2b()
+    config.num_layers = 1
+    config.embed_dim = 256
+    config.hidden_dim = 512
+    config.num_heads = 4
+    config.head_dim = 64
+    config.num_kv_heads = 1
+    config.remat_config = model_lib.RematConfig.DECODER
+
+    rngs = nnx.Rngs(0)
+    model = model_lib.Gemma4(config, rngs=rngs)
+
+    tokens = jax.random.randint(
+        jax.random.PRNGKey(0), (2, 32), 0, config.num_embed
+    )
+
+    positions = jnp.tile(
+        jnp.arange(tokens.shape[1])[None, :], (tokens.shape[0], 1)
+    )
+    attn_mask = jnp.tril(
+        jnp.ones((tokens.shape[1], tokens.shape[1]), dtype=jnp.bool_)
+    )[None, ...]
+
+    def loss_fn(model, tokens, positions, attn_mask):
+      logits, _ = model(tokens, positions=positions, attention_mask=attn_mask)
+      return jnp.sum(logits)
+
+    loss, grads = nnx.value_and_grad(loss_fn)(
+        model, tokens, positions, attn_mask
+    )
+    self.assertIsNotNone(loss)
+    self.assertIsNotNone(grads)
+
+  def test_remat_while_loop_trace_context(self):
+    config = model_lib.ModelConfig.gemma4_e2b()
+    config.num_layers = 1
+    config.embed_dim = 256
+    config.hidden_dim = 512
+    config.num_heads = 4
+    config.head_dim = 64
+    config.num_kv_heads = 1
+    config.remat_config = model_lib.RematConfig.BLOCK
+
+    rngs = nnx.Rngs(0)
+    model = model_lib.Gemma4(config, rngs=rngs)
+
+    tokens = jax.random.randint(
+        jax.random.PRNGKey(0), (2, 32), 0, config.num_embed
+    )
+    positions = jnp.tile(
+        jnp.arange(tokens.shape[1])[None, :], (tokens.shape[0], 1)
+    )
+    attn_mask = jnp.tril(
+        jnp.ones((tokens.shape[1], tokens.shape[1]), dtype=jnp.bool_)
+    )[None, ...]
+
+    graphdef, state = nnx.split(model, nnx.Param)
+
+    def decode_fn(params):
+      def body_fn(step, _):
+        transformer = nnx.merge(graphdef, params)
+        logits, _ = transformer(
+            tokens, positions=positions, attention_mask=attn_mask
+        )
+        return step + 1, logits
+
+      return jax.lax.while_loop(
+          lambda state: state[0] < 1,
+          lambda state: body_fn(state[0], state[1]),
+          (jnp.array(0), jnp.zeros((2, 32, config.num_embed))),
+      )
+
+    compiled_decode = jax.jit(decode_fn)
+    _, logits = compiled_decode(state)
+    self.assertEqual(logits.shape, (2, 32, config.num_embed))
+
 
 if __name__ == "__main__":
   absltest.main()
