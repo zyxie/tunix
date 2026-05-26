@@ -196,11 +196,7 @@ class AgenticRLLearner(abc.ABC, Generic[TConfig]):
     # ``train_steps % eval_every_n_steps == 0`` check would fire at every
     # micro-iteration during an eval boundary, causing the full evaluation
     # rollout to be replayed ``grad_accum_steps`` times for the same step.
-    # Initialized to 0 (not -1) so the eval-at-step-0 baseline pass is
-    # skipped; it adds ~1-2 min to startup without exercising any trained
-    # weights. Subsequent evals at train_steps == eval_every_n_steps still
-    # fire normally.
-    self._last_eval_train_step = 0
+    self._last_eval_train_step = -1
 
     # Sync weights if the actor model and rollout model are not sharing weights.
     self.should_sync_weights = not (

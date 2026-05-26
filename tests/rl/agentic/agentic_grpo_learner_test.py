@@ -535,7 +535,10 @@ class AgenticGrpoLearnerTest(parameterized.TestCase):
       def __init__(self, *, rngs: nnx.Rngs):
         self.lm_head = 1
 
-      def __call__(self, inputs, positions, cache, attention_mask):
+      def __call__(
+          self, inputs, positions, cache, attention_mask, **kwargs
+      ):
+        del kwargs
         return (
             jnp.full(
                 (*inputs.shape, 32),
@@ -600,7 +603,10 @@ class AgenticGrpoLearnerTest(parameterized.TestCase):
       def __init__(self, *, rngs: nnx.Rngs):
         self.lm_head = 1
 
-      def __call__(self, inputs, positions, cache, attention_mask):
+      def __call__(
+          self, inputs, positions, cache, attention_mask, **kwargs
+      ):
+        del kwargs
         return (
             jnp.full(
                 (*inputs.shape, 32),
