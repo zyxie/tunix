@@ -119,8 +119,10 @@ def sample_top_p(
   # Upcast to float32 for numerical stability of softmax and subsequent cumsum.
   next_token_logits = logits[:, -1].astype(jnp.float32) / temperature
 
+  # top_k=0 or None both mean "no top-k filtering" — use full vocabulary.
+  _no_topk = top_k is None or top_k <= 0
   # Skip softmax and sorting if top_p is 1.0 and top_k is full vocab.
-  if top_p >= 1.0 and top_k is None:
+  if top_p >= 1.0 and _no_topk:
     next_token = jax.random.categorical(key, logits=next_token_logits)
     if not return_logprobs:
       return next_token, None
@@ -129,7 +131,7 @@ def sample_top_p(
     logp_sampled = jnp.squeeze(logp_sampled, axis=-1)
     return next_token, logp_sampled
 
-  k = next_token_logits.shape[-1] if top_k is None else top_k
+  k = next_token_logits.shape[-1] if _no_topk else top_k
   logits_sorted, indices = jax.lax.top_k(next_token_logits, k=k)
 
   probs_sorted = jax.nn.softmax(logits_sorted, axis=-1)
