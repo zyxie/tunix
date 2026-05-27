@@ -52,4 +52,5 @@ python3 -m tunix.cli.grpo_main \
   rl_training_config.actor_optimizer_config.warmup_steps=$warmup_steps \
   rl_training_config.actor_optimizer_config.decay_steps=$max_steps \
   rl_training_config.max_steps=$max_steps \
-  rl_training_config.metrics_logging_options.log_dir="/tmp/tensorboard/grpo"
+  rl_training_config.metrics_logging_options.log_dir="/tmp/tensorboard/grpo" \
+  "$@"

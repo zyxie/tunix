@@ -75,6 +75,20 @@ class ModelIntegrationTest(parameterized.TestCase):
       expected_tokenizer_path,
       model_path=None,
   ):
+    if model_source == "kaggle":
+      try:
+        import kagglesdk.kaggle_env  # pylint: disable=g-import-not-at-top # pytype: disable=import-error
+        if not hasattr(kagglesdk.kaggle_env, 'get_web_endpoint') and hasattr(kagglesdk.kaggle_env, 'get_endpoint'):
+          kagglesdk.kaggle_env.get_web_endpoint = kagglesdk.kaggle_env.get_endpoint
+      except Exception:  # pylint: disable=broad-exception-caught
+        pass
+      try:
+        import kagglehub  # pylint: disable=g-import-not-at-top,unused-import
+      except ImportError:
+        self.skipTest(
+            "Skipping Kaggle test because kagglehub is not available or has "
+            "import mismatches."
+        )
     model_config = {
         "model_name": model_name,
         "model_source": model_source,

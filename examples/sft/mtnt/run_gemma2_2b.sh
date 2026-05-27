@@ -36,4 +36,6 @@ python3 -m tunix.cli.peft_main \
   tokenizer_config.tokenizer_path="/tmp/models/gemma-2b/models/google/gemma-2/flax/gemma2-2b-it/1/tokenizer.model" \
   batch_size=$batch_size \
   training_config.max_steps=$max_steps \
-  training_config.metrics_logging_options.log_dir="/tmp/tensorboard/full"
+  training_config.metrics_logging_options.log_dir="/tmp/tensorboard/full" \
+  "$@"
+

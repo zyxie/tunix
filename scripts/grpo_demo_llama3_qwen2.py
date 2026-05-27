@@ -984,7 +984,7 @@ def evaluate(
     multiple_call_responses = [[] for _ in range(len(questions))]
     for p in range(num_passes):
       responses = generate(
-          questions, sampler, temperature, top_k, top_p, seed=p
+          questions, sampler, temperature, top_k, top_p, seed=None
       )
       for idx, response in enumerate(responses):
         multiple_call_responses[idx].append(response)

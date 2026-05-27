@@ -656,6 +656,9 @@ MODEL_MAPPING = {
 mesh_config = [[1, 2], ["fsdp", "tp"]]  # 2-way tensor parallelism
 # %%
 # MATH-500
+num_batches_env = os.environ.get("NUM_BATCHES")
+num_batches = int(num_batches_env) if num_batches_env and int(num_batches_env) > 0 else None
+
 # model_version = "Qwen/Qwen2.5-1.5B-Instruct"
 model_version = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
 dataset = MATH_500_DATA_PATH
@@ -676,7 +679,7 @@ evaluator.load_model()
 print("\nStarting evaluation...")
 results = evaluator.evaluate(
     batch_size=8,
-    num_batches=None,
+    num_batches=num_batches,
     temperature=0.6,
     top_k=50,
     top_p=0.95,
@@ -717,7 +720,7 @@ print("\nStarting evaluation...")
 
 results = evaluator.evaluate(
     batch_size=1,
-    num_batches=None,
+    num_batches=num_batches,
     temperature=0.6,
     top_k=None,
     top_p=0.95,

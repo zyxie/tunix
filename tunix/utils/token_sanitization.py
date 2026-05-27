@@ -35,7 +35,7 @@ _CONTROL_TOKENS_RE = re.compile('|'.join(map(re.escape, _CONTROL_TOKENS)))
 
 
 def sanitize_control_tokens(
-    content: str,
+    content: str | bytes,
     extra_tokens: Iterable[str] | None = None,
     include_default: bool = True,
 ) -> str:
@@ -49,8 +49,21 @@ def sanitize_control_tokens(
   Returns:
     The sanitized content.
   """
+  if isinstance(content, (bytes, bytearray)):
+    content = content.decode('utf-8', errors='replace')
+  elif isinstance(content, memoryview):
+    content = content.tobytes().decode('utf-8', errors='replace')
+  elif not isinstance(content, str):
+    if hasattr(content, 'decode'):
+      try:
+        content = content.decode('utf-8', errors='replace')
+      except Exception:  # pylint: disable=broad-except
+        content = str(content)
+    elif content is not None:
+      content = str(content)
+
   if not content:
-    return content
+    return content  # pytype: disable=bad-return-type
 
   if include_default and not extra_tokens:
     regex = _CONTROL_TOKENS_RE

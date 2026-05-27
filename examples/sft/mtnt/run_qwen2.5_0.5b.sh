@@ -43,5 +43,7 @@ python3 -m tunix.cli.peft_main \
   training_config.eval_every_n_steps=20 \
   training_config.max_steps=$max_steps \
   training_config.metrics_logging_options.log_dir="/tmp/tensorboard/full" \
-  training_config.metrics_logging_options.flush_every_n_steps=20 
+  training_config.metrics_logging_options.flush_every_n_steps=20 \
+  "$@"
+
 

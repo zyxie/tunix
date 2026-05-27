@@ -347,13 +347,24 @@ def compute_per_token_logps(
       "attention_mask": attn_mask,
   }
   # Pass through any segment ids so the model's attention kernel can respect
-  # them: caller-provided packing ids take precedence; otherwise we pass the
-  # per-position non-pad mask derived in ``process_ids`` so flash-attention
-  # variants that lack a separate padding-mask input still skip pad positions.
-  if segment_ids is not None:
-    model_kwargs["segment_ids"] = segment_ids
-  elif input_seg_ids is not None:
-    model_kwargs["segment_ids"] = input_seg_ids
+  # them only if the model signature accepts it: caller-provided packing ids take
+  # precedence; otherwise we pass the per-position non-pad mask derived in
+  # ``process_ids`` so flash-attention variants that lack a separate
+  # padding-mask input still skip pad positions.
+  import inspect  # pylint: disable=g-import-not-at-top
+  try:
+    sig = inspect.signature(model.__call__)
+    has_segment_ids = ("segment_ids" in sig.parameters) or any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+    )
+  except Exception:
+    has_segment_ids = False
+
+  if has_segment_ids:
+    if segment_ids is not None:
+      model_kwargs["segment_ids"] = segment_ids
+    elif input_seg_ids is not None:
+      model_kwargs["segment_ids"] = input_seg_ids
   if images is not None:
     model_kwargs["images"] = images
 

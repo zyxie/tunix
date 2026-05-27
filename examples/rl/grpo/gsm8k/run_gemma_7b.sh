@@ -29,7 +29,7 @@ echo "  Warmup Ratio: $warmup_ratio"
 echo "  Train Fraction: $train_fraction"
 
 
-max_steps_float=$(awk "BEGIN {print $batch_size * $num_batches * $num_train_epochs * $train_fraction}")
+max_steps_float=$(awk "BEGIN {print $num_batches * $num_train_epochs * $train_fraction}")
 
 max_steps=$(printf "%.0f" "$max_steps_float")
 
@@ -59,7 +59,6 @@ python3 -m tunix.cli.grpo_main \
   reference_model_config.same_mesh_as="actor" \
   rollout_model_config.mesh=null \
   rollout_model_config.same_mesh_as="actor" \
-  tokenizer_config.tokenizer_path="/tmp/models/gemma-7b/models/google/gemma/flax/7b-it/2/tokenizer.model" \
   tokenizer_config.tokenizer_type="sentencepiece" \
   tokenizer_config.add_bos=false \
   dataset_name="gsm8k" \
@@ -98,4 +97,5 @@ python3 -m tunix.cli.grpo_main \
   grpo_config.num_iterations=1 \
   grpo_config.beta=0.08 \
   grpo_config.epsilon=0.2 \
-  reward_functions="['tunix/cli/reward_fn/gsm8k.py']"
+  reward_functions="['tunix/cli/reward_fn/gsm8k.py']" \
+  "$@"

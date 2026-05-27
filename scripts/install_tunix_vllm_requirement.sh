@@ -24,7 +24,7 @@ REQ_FILE=${REQ_FILE:-"${ROOT_DIR}/requirements/requirements.txt"}
 SPECIAL_REQ_FILE=${SPECIAL_REQ_FILE:-"${ROOT_DIR}/requirements/special_requirements.txt"}
 
 python3 -m ensurepip --default-pip
-python3 -m pip install --upgrade pip setuptools wheel
+python3 -m pip install --upgrade pip setuptools wheel setuptools-rust
 
 pip install aiohttp==3.12.15
 

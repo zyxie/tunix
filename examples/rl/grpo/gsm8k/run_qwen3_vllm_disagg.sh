@@ -21,9 +21,15 @@ batch_size=${batch_size:-8}
 num_train_epochs=${num_train_epochs:-1}
 warmup_ratio=${warmup_ratio:-0.1}
 train_fraction=${train_fraction:-0.8}
-actor_mesh_shape=${actor_mesh_shape:-"(2,4)"}
-rollout_mesh_shape=${rollout_mesh_shape:-"(2,4)"}
-checkpoint_dir=${checkpoint_dir:-"/tmp/grpo_checkpoints/${model_name}"}
+TPUS=$(python3 -c "import jax; print(len(jax.devices()))" 2>/dev/null || echo 16)
+if [ "$TPUS" -le 8 ]; then
+  actor_mesh_shape=${actor_mesh_shape:-"(2,2)"}
+  rollout_mesh_shape=${rollout_mesh_shape:-"(2,2)"}
+else
+  actor_mesh_shape=${actor_mesh_shape:-"(2,4)"}
+  rollout_mesh_shape=${rollout_mesh_shape:-"(2,4)"}
+fi
+checkpoint_dir=${checkpoint_dir:-"/tmp/grpo_checkpoints/${model_name}_$RANDOM"}
 
 echo "Using parameters:"
 echo "  Batch Size: $batch_size"
@@ -43,6 +49,7 @@ python3 -m tunix.cli.grpo_main \
   model_config.flash_attention_block_size=256 \
   model_config.intermediate_ckpt_dir="/tmp/intermediate_ckpt/${model_name}" \
   model_config.rng_seed=42 \
+  model_config.remat_config=3 \
   actor_model_config.mesh.shape=${actor_mesh_shape} \
   actor_model_config.mesh.axis_names="('fsdp','tp')" \
   reference_model_config.mesh=null \
@@ -85,4 +92,6 @@ python3 -m tunix.cli.grpo_main \
   grpo_config.num_iterations=1 \
   grpo_config.beta=0.08 \
   grpo_config.epsilon=0.2 \
-  reward_functions="['tunix/cli/reward_fn/gsm8k.py']"
+  reward_functions="['tunix/cli/reward_fn/gsm8k.py']" \
+  "$@"
+
