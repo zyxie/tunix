@@ -22,6 +22,7 @@ import os
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from absl import logging
+from flax import nnx
 import jax
 import jaxtyping
 import numpy as np
@@ -245,6 +246,14 @@ class VllmSampler(base_sampler.BaseSampler):  # pylint: disable=invalid-name
           delete_dst_buffers=True,  # Ensure old weights are deleted to free up HBM memory
           reshard_chunk_size=self.config.reshard_chunk_size,
       )
+
+    if hasattr(self._model_runner, "state_leaves"):
+      if isinstance(self._model_runner.state, nnx.State):
+        self._model_runner.state_leaves = tuple(
+            jax.tree_util.tree_leaves(self._model_runner.state)
+        )
+      else:
+        self._model_runner.state_leaves = self._model_runner.state
 
     if self.llm is not None:
       self.llm.collective_rpc("reinitialize_kv_cache")

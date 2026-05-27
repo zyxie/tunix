@@ -114,6 +114,30 @@ TO_HF_MAPPINGS = {
         'model.layers.*.post_feedforward_layernorm_2.weight',
         (None,),
     ),
+    'embedder.per_layer_input_embedding': (
+        'model.embed_tokens_per_layer.weight',
+        ('model', None, None),
+    ),
+    'embedder.per_layer_model_projection.w': (
+        'model.per_layer_model_projection.weight',
+        (None, None, 'model'),
+    ),
+    'embedder.per_layer_projection_norm.scale': (
+        'model.per_layer_projection_norm.weight',
+        (None,),
+    ),
+    'layers.*.per_layer_input_gate.w': (
+        'model.layers.*.per_layer_input_gate.weight',
+        (None, 'model'),
+    ),
+    'layers.*.per_layer_projection.w': (
+        'model.layers.*.per_layer_projection.weight',
+        ('model', None),
+    ),
+    'layers.*.post_per_layer_input_norm.scale': (
+        'model.layers.*.post_per_layer_input_norm.weight',
+        (None,),
+    ),
 }
 
 LORA_TO_HF_MAPPINGS: Dict[str, MappingEntry] = {}
