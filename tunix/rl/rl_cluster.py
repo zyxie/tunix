@@ -979,7 +979,6 @@ class RLCluster:
       pad_id: int,
       eos_id: int,
       micro_batch_size: int | None = None,
-      completion_mask: jax.Array | None = None,
   ) -> jax.Array:
     """Gets the per-token logps of the reference model."""
     batch_size = prompt_tokens.shape[0]
@@ -1000,13 +999,6 @@ class RLCluster:
           completion_tokens,
           self.cluster_config.training_config.data_sharding_axis,
       )
-      if completion_mask is not None:
-        dest_completion_mask = sharding_utils.shard_input(
-            completion_mask,
-            self.cluster_config.training_config.data_sharding_axis,
-        )
-      else:
-        dest_completion_mask = None
       self._maybe_load_model_from_cpu(
           self.inference_worker.get_model("reference"), Role.REFERENCE
       )
@@ -1021,9 +1013,6 @@ class RLCluster:
                 dest_completion_tokens[batch_slice],
                 pad_id,
                 eos_id,
-                completion_mask=None
-                if dest_completion_mask is None
-                else dest_completion_mask[batch_slice],
                 temperature=temperature,
             )
         )
@@ -1038,7 +1027,6 @@ class RLCluster:
       prompt_tokens: jax.Array,
       completion_tokens: jax.Array,
       micro_batch_size: int | None = None,
-      completion_mask: jax.Array | None = None,
   ) -> jax.Array:
     """Gets the per-token logps of the current policy model."""
     batch_size = prompt_tokens.shape[0]
@@ -1059,9 +1047,6 @@ class RLCluster:
             self.rollout.get_per_token_logps(
                 prompt_tokens[batch_slice],
                 completion_tokens[batch_slice],
-                completion_mask=None
-                if completion_mask is None
-                else completion_mask[batch_slice],
             )
         )
       per_token_logps = jnp.concatenate(outs, axis=0)
@@ -1078,7 +1063,6 @@ class RLCluster:
       pad_id: int,
       eos_id: int,
       micro_batch_size: int | None = None,
-      completion_mask: jax.Array | None = None,
       temperature: float | None = None,
   ) -> jax.Array:
     """Gets per-token logps from the actor model on the trainer side.
@@ -1110,13 +1094,6 @@ class RLCluster:
           completion_tokens,
           self.cluster_config.training_config.data_sharding_axis,
       )
-      if completion_mask is not None:
-        dest_completion_mask = sharding_utils.shard_input(
-            completion_mask,
-            self.cluster_config.training_config.data_sharding_axis,
-        )
-      else:
-        dest_completion_mask = None
 
       # Use the anchor (start-of-global-step) actor weights so old_per_token_logps
       # reference the same policy vllm sampled with even when mini_batch_size <
@@ -1154,9 +1131,6 @@ class RLCluster:
                 completion_tokens=dest_completion_tokens[batch_slice],
                 pad_id=pad_id,
                 eos_id=eos_id,
-                completion_mask=None
-                if dest_completion_mask is None
-                else dest_completion_mask[batch_slice],
                 stop_gradient=True,
                 return_logits=False,
                 temperature=temperature,
@@ -1201,7 +1175,6 @@ class RLCluster:
       completion_tokens: jax.Array,
       pad_id: int,
       eos_id: int,
-      completion_mask: jax.Array | None = None,
   ) -> jax.Array:
     with self._get_mesh_and_logical_axis_rules_cm(Role.CRITIC):
       return self.inference_worker.get_values(
@@ -1209,7 +1182,6 @@ class RLCluster:
           completion_tokens,
           pad_id,
           eos_id,
-          completion_mask=completion_mask,
       )
 
   def get_rewards(
