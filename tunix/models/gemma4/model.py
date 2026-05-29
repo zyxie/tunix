@@ -30,6 +30,7 @@ from jax.interpreters import pxla
 import jax.sharding as shd
 from jax.sharding import PartitionSpec as P
 import jaxtyping
+import numpy as np
 from tunix.generate.mappings import BackendMappingMixin
 from tunix.models.gemma4 import moe
 from tunix.utils import compat
@@ -147,7 +148,7 @@ class ModelConfig:
   moe_dense_hidden_dim: int | None = None
 
   def __post_init__(self):
-    # TODO: support flash attention with sliding window KV cache
+    # TODO(tunix-dev): support flash attention with sliding window KV cache
     if self.use_sliding_window_kv_cache and self.use_flash_attention:
       raise ValueError(
           'Flash attention and sliding window KV cache are mutually exclusive.'
@@ -742,8 +743,7 @@ class Attention(nnx.Module):
           'k': key_proj,
       }
 
-    b, t, qh, d = query_proj.shape
-    _, _, kh, _ = key_proj.shape
+    _, _, qh, _ = query_proj.shape
 
     if self.config.use_flash_attention and seq_len > 1:
       query_proj = query_proj.transpose(0, 2, 1, 3)
@@ -803,7 +803,7 @@ class Attention(nnx.Module):
       def sharded_splash_attn(kernel, q_block, k_block, v_block):
         return jax.vmap(kernel)(q_block, k_block, v_block)
 
-      qkv = sharded_splash_attn(
+      qkv: jaxtyping.Array = sharded_splash_attn(
           splash_attn_kernel, query_proj, key_proj, value_proj
       )
       encoded = qkv.transpose(0, 2, 1, 3)
@@ -918,27 +918,23 @@ class Attention(nnx.Module):
     ):
       cache_len = min(max_seq_len, self.config.sliding_window_size)
 
-    return {
-        'k': jnp.zeros(
-            (
-                batch_size,
-                cache_len,
-                self.num_kv_heads,
-                self.head_dim,
-            ),
-            dtype,
-        ),
-        'v': jnp.zeros(
-            (
-                batch_size,
-                cache_len,
-                self.num_kv_heads,
-                self.head_dim,
-            ),
-            dtype,
-        ),
-        'end_index': jnp.zeros((batch_size,), jnp.int32),
-    }
+    cache_shape = (batch_size, cache_len, self.num_kv_heads, self.head_dim)
+    k = shard(
+        np.zeros(cache_shape, dtype),
+        self.config.shd_config.act_btnh,
+        eager=True
+    )
+    v = shard(
+        np.zeros(cache_shape, dtype),
+        self.config.shd_config.act_btnh,
+        eager=True,
+    )
+    end_index = shard(
+        np.zeros((batch_size,), np.int32),
+        self.config.shd_config.act_btnh[:1],
+        eager=True,
+    )
+    return {'k': k, 'v': v, 'end_index': end_index}
 
 
 class FeedForward(nnx.Module):
@@ -1315,3 +1311,7 @@ class Gemma4(BackendMappingMixin, nnx.Module):
         continue  # Skip shared layers.
       cache[f'layer_{i}'] = layer.init_cache(batch_size, max_seq_len, dtype)
     return cache
+
+  @property
+  def num_embed(self) -> int:
+    return self.config.num_embed
