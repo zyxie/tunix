@@ -1116,9 +1116,12 @@ class RLCluster:
           ),
           actor_pspecs,
       )
-      state = reshard.reshard_pytree(
-          self._anchor_policy_state, actor_model_sharding
-      )
+      if self._is_state_on_device(self._anchor_policy_state):
+        anchor_policy_state = self._anchor_policy_state
+      else:
+        anchor_policy_state = rl_utils.put_params_on_memory_kind(
+            self._anchor_policy_state, self._default_memory_kind
+        )
       outs = []
       for batch_slice in rl_utils.chunk_slices_by_size(
           stop=batch_size, step=micro_batch_size
@@ -1126,7 +1129,7 @@ class RLCluster:
         outs.append(
             common.compute_per_token_logps(
                 graphdef,
-                state,
+                anchor_policy_state,
                 prompt_tokens=dest_prompt_tokens[batch_slice],
                 completion_tokens=dest_completion_tokens[batch_slice],
                 pad_id=pad_id,
@@ -1137,7 +1140,7 @@ class RLCluster:
             )
         )
       actor_per_token_logps = jnp.concatenate(outs, axis=0)
-      del state
+      del anchor_policy_state
       gc.collect()
       if actor_trainer_state_on_device and self.cluster_config.offload_to_cpu:
         self._put_model_on_memory_kind(
