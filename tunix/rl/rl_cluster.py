@@ -1106,17 +1106,9 @@ class RLCluster:
       if actor_trainer_state_on_device and self.cluster_config.offload_to_cpu:
         self._put_model_on_memory_kind(self.actor_trainer.model, "pinned_host")
         gc.collect()
-      graphdef, actor_state = nnx.split(self.actor_trainer.model)
-      actor_pspecs = nnx.get_partition_spec(actor_state)
-      actor_model_sharding = jax.tree.map(
-          lambda x: jax.sharding.NamedSharding(
-              mesh,
-              x if x is not None else jax.sharding.PartitionSpec(),
-              memory_kind=self._default_memory_kind,
-          ),
-          actor_pspecs,
-      )
-      if self._is_state_on_device(self._anchor_policy_state):
+      graphdef, _ = nnx.split(self.actor_trainer.model)
+      anchor_on_device = self._is_state_on_device(self._anchor_policy_state)
+      if anchor_on_device:
         anchor_policy_state = self._anchor_policy_state
       else:
         anchor_policy_state = rl_utils.put_params_on_memory_kind(
@@ -1140,7 +1132,8 @@ class RLCluster:
             )
         )
       actor_per_token_logps = jnp.concatenate(outs, axis=0)
-      del anchor_policy_state
+      if not anchor_on_device:
+        del anchor_policy_state
       gc.collect()
       if actor_trainer_state_on_device and self.cluster_config.offload_to_cpu:
         self._put_model_on_memory_kind(
