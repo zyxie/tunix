@@ -32,8 +32,8 @@ import jax
 import numpy as np
 import omegaconf
 import optax
-import orbax.checkpoint as ocp
 from tunix.perf import metrics as perf_metrics
+from tunix.sft import checkpoint_options
 from tunix.sft import metrics_logger
 from tunix.sft import profiler
 
@@ -760,9 +760,14 @@ class HyperParameters:
     constructed_training_config = collections.defaultdict()
     for key, value in training_config.items():
       if key == "checkpointing_options" and value:
+        if not isinstance(value, collections.abc.Mapping):
+          raise ValueError(
+              "Expected dictionary for checkpointing_options, but got"
+              f" {type(value).__name__}"
+          )
         try:
-          constructed_training_config[key] = ocp.CheckpointManagerOptions(
-              **value
+          constructed_training_config[key] = (
+              checkpoint_options.checkpointing_options_from_dict(value)
           )
         except ValueError as e:
           raise ValueError(f"Invalid checkpointing options: {value}") from e
