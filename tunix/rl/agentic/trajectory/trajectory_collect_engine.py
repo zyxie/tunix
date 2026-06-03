@@ -521,6 +521,16 @@ class TrajectoryCollectEngine:
     )
     logging.debug("%s model_call done", self._debug_prefix)
 
+    # Align trajectory prompt tokens with the rollout worker's actual
+    # tokenization on the first turn to prevent prompt token desync.
+    if (
+        not self.agent.trajectory.steps
+        and rollout_output.left_padded_prompt_tokens is not None
+    ):
+      self.agent.trajectory.prompt_tokens = (
+          rollout_output.left_padded_prompt_tokens[0]
+      )
+
     if rollout_output.tokens:
       self._response_token_count += len(rollout_output.tokens[0])
     if self._check_and_set_context_limit_reached():
