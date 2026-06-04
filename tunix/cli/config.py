@@ -353,7 +353,10 @@ class HyperParameters:
           f" {valid_tokenizer_type} is supported"
       )
     if tokenizer_type == "huggingface":
-      if "HF_TOKEN" not in os.environ:
+      # Only require HF_TOKEN when loading from HuggingFace Hub (not a local
+      # or CNS path).
+      is_local_path = tokenizer_path.startswith(("/", "gs://"))
+      if not is_local_path and "HF_TOKEN" not in os.environ:
         raise ValueError("Missing `HF_TOKEN` to access hf tokenizer")
       if not tokenizer_path:
         raise ValueError("tokenizer_path must be specified.")
