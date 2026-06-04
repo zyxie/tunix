@@ -1042,10 +1042,12 @@ class HyperParameters:
         reward_fns.append(reward_fn)
 
       else:
-        # Get all defined functions in the file as reward functions
+        # Get all defined functions in the file as reward functions.
+        # We explicitly ignore functions whose names start with an underscore (_),
+        # ensuring private helper functions are never mistaken for reward functions.
         defined_functions = []
-        for _, member in inspect.getmembers(module):
-          if inspect.isfunction(member):
+        for name, member in inspect.getmembers(module):
+          if inspect.isfunction(member) and not name.startswith("_"):
             # Check if the function was defined in this module
             if member.__module__ == module_name:
               defined_functions.append(member)
