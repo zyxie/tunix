@@ -219,6 +219,70 @@ ClusterConfig(
 )
 ```
 
+### Topology-aware sub-mesh allocation
+
+The disaggregated example above slices the flat `jax.devices()` list
+(`devices[:split]`). On a TPU that flat order is one-dimensional, so a plain
+slice is not guaranteed to be a contiguous physical box on the ICI torus — it
+can straddle hosts/slices and hurt collective performance. For multi-slice,
+sub-slice, or Pathways setups, prefer `tunix.utils.mesh`, which selects a
+contiguous, topology-valid device box (respecting slice/host boundaries and the
+shapes each TPU generation supports) and then shapes it into a `Mesh`.
+
+Allocate one mesh:
+
+```python
+from tunix.utils import mesh as mesh_lib
+
+# Pick a contiguous, topology-aware 8-device box, then give it a logical shape.
+actor_devices = mesh_lib.allocate_devices(8, mesh_name="actor")
+actor_mesh = mesh_lib.create_mesh(
+    axis_shapes=(2, 4), axis_names=("fsdp", "tp"), devices=actor_devices)
+```
+
+Carve several named sub-meshes from one pool without overlap (disaggregated):
+
+```python
+from tunix.rl.rl_cluster import ClusterConfig, Role
+from tunix.utils import mesh as mesh_lib
+
+allocations = mesh_lib.allocate_named_mesh_device_slices(
+    [("train", 4), ("rollout", 4)],
+    allocation_policy="COMPACT",   # or "PERFORMANCE" for more cubical shapes
+)
+train_mesh = mesh_lib.create_mesh(
+    (4, 1), ("fsdp", "tp"), devices=allocations["train"])
+rollout_mesh = mesh_lib.create_mesh(
+    (4, 1), ("fsdp", "tp"), devices=allocations["rollout"])
+
+ClusterConfig(
+    role_to_mesh={
+        Role.ACTOR: train_mesh,
+        Role.REFERENCE: train_mesh,
+        Role.ROLLOUT: rollout_mesh,
+    },
+    ...
+)
+```
+
+When requirements are discovered incrementally, thread the returned state:
+
+```python
+train_devices, state = mesh_lib.allocate_devices(
+    4, mesh_name="train", return_state=True)
+rollout_devices, state = mesh_lib.allocate_devices(
+    4, mesh_name="rollout", allocation_state=state, return_state=True)
+```
+
+Notes:
+
+- Omit `devices=` to allocate from the full `jax.devices()` pool; pass an
+  explicit list to allocate from a subset.
+- `create_mesh` requires `prod(axis_shapes) == len(devices)`.
+- From the CLI, each role's `*_model_config.mesh` gets its own sub-mesh; a role
+  may instead share another's via `same_mesh_as` (e.g.
+  `reference_model_config.same_mesh_as: actor`).
+
 ## Weight transfer/sync
 
 Weight transfer and sync is critical to keeping rollout models up-to-date with
