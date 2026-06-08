@@ -65,7 +65,7 @@ jobs:
 
       - name: Run shared mesh and topology tests
         run: |
-          python -m pytest tests/utils/mesh_utils_test.py tests/utils/topology_test.py -v --tb=short
+          python -m pytest tests/utils/mesh_test.py tests/utils/topology_test.py -v --tb=short
 
       - name: Run perf tests
         run: |
