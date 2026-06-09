@@ -1237,7 +1237,10 @@ class Gemma4(BackendMappingMixin, nnx.Module):
       cache=None,
       attention_mask=None,
       decode_only_last_token=False,
+      segment_ids=None,
   ):
+    # Accepted for RL pipeline compatibility; unused until seq packing lands.
+    del segment_ids
     if positions is None:
       B, T = tokens.shape  # pylint: disable=invalid-name
       positions = jnp.tile(jnp.arange(T)[None, :], (B, 1))
