@@ -38,6 +38,7 @@ dependencies = [
   "perfetto",  # Perfetto trace writer for metrics export
   "qwix>=0.1.6",
   "sentencepiece",
+  "safetensors<0.8", # higher versions breaks with jax >=0.9
   "sympy",  # Eval result parsing
   "tensorflow_datasets",
   "tqdm",
