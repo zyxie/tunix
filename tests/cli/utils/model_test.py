@@ -228,7 +228,7 @@ class ModelTest(parameterized.TestCase):
     mock_automodel.from_pretrained.assert_called_once()
     if apply_lora:
       mock_apply_lora.assert_called_once_with(
-          mock_model, mesh, model_config['lora_config']
+          mock_model, mesh, model_config['lora_config'], rng_seed=0
       )
       self.assertEqual(returned_model, mock_lora_model)
     else:

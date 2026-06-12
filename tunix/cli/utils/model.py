@@ -28,7 +28,7 @@ from tunix.rl import reshard
 _DEFAULT_TOKENIZER_PATH = 'meta-llama/Llama-3.1-8B'
 
 
-def apply_lora_to_model(base_model, mesh, lora_config):
+def apply_lora_to_model(base_model, mesh, lora_config, rng_seed=0):
   """Apply Lora to the base model if given lora config."""
   logging.info('lora_config %r', lora_config)
   # Basic keyword arguments for LoraProvider
@@ -58,7 +58,7 @@ def apply_lora_to_model(base_model, mesh, lora_config):
 
   model_input = base_model.get_model_input()
   lora_model = qwix.apply_lora_to_model(
-      base_model, lora_provider, **model_input
+      base_model, lora_provider, rngs=nnx.Rngs(rng_seed), **model_input
   )
   if mesh is not None:
     lora_model = reshard.reshard_model_to_mesh(lora_model, mesh)
@@ -188,7 +188,10 @@ def create_model(
 
   if model_config.get('lora_config'):
     # Apply Lora to model if given lora config
-    model = apply_lora_to_model(model, mesh, model_config['lora_config'])
+    model = apply_lora_to_model(
+        model, mesh, model_config['lora_config'],
+        rng_seed=model_config.get('rng_seed', 0)
+    )
   else:
     logging.info('Training with Full Weight')
 
