@@ -53,7 +53,7 @@ class ModelTest(parameterized.TestCase):
     }
     model.create_tokenizer(tokenizer_config, tokenizer_path=tokenizer_path)
     mock_tokenizer.assert_called_once_with(
-        "type1", expected_path, True, False, mock.ANY
+        'type1', expected_path, True, False, mock.ANY
     )
 
   @parameterized.named_parameters(
@@ -64,6 +64,7 @@ class ModelTest(parameterized.TestCase):
               'rank': 1,
               'alpha': 1.0,
           },
+          remat_config=None,
       ),
       dict(
           testcase_name='quant',
@@ -74,16 +75,37 @@ class ModelTest(parameterized.TestCase):
               'tile_size': 1,
               'weight_qtype': 'int8',
           },
+          remat_config=None,
+      ),
+      dict(
+          testcase_name='with_remat',
+          lora_config={
+              'module_path': 'path',
+              'rank': 1,
+              'alpha': 1.0,
+          },
+          remat_config=2,
       ),
   )
   @mock.patch.object(qwix, 'LoraProvider', autospec=True)
   @mock.patch.object(qwix, 'apply_lora_to_model', autospec=True)
   @mock.patch.object(reshard, 'reshard_model_to_mesh', autospec=True)
   def test_apply_lora_to_model(
-      self, mock_reshard, mock_apply_lora, mock_lora_provider, lora_config
+      self,
+      mock_reshard,
+      mock_apply_lora,
+      mock_lora_provider,
+      lora_config,
+      remat_config,
   ):
-    base_model = mock.create_autospec(
-        test_common.ToyTransformer, instance=True, spec_set=True
+    base_model = mock.create_autospec(test_common.ToyTransformer, instance=True)
+    base_model.config = mock.create_autospec(
+        test_common.ModelConfig, instance=True
+    )
+    if remat_config is not None:
+      base_model.config.remat_config = remat_config
+    mock_apply_lora.return_value.config = mock.create_autospec(
+        test_common.ModelConfig, instance=True
     )
     base_model.get_model_input.return_value = {}
     mesh = mock.create_autospec(jax.sharding.Mesh, instance=True, spec_set=True)
@@ -91,6 +113,11 @@ class ModelTest(parameterized.TestCase):
     mock_lora_provider.assert_called_once_with(**lora_config)
     mock_apply_lora.assert_called_once()
     mock_reshard.assert_called_once()
+    if remat_config is not None:
+      self.assertEqual(base_model.config.remat_config, 1)
+      self.assertEqual(
+          mock_apply_lora.return_value.config.remat_config, remat_config
+      )
 
   @parameterized.named_parameters(
       dict(
@@ -210,7 +237,10 @@ class ModelTest(parameterized.TestCase):
   ):
     mock_download_model.return_value = 'mock_model_path'
     mesh = mock.create_autospec(jax.sharding.Mesh, instance=True, spec_set=True)
-    mock_model = mock.create_autospec(nnx.Module, instance=True, spec_set=True)
+    mock_model = mock.create_autospec(nnx.Module, instance=True)
+    mock_model.config = mock.create_autospec(
+        test_common.ModelConfig, instance=True
+    )
     mock_automodel.from_pretrained.return_value = (
         mock_model,
         'mock_model_path',
@@ -240,5 +270,5 @@ class ModelTest(parameterized.TestCase):
       mock_nnx_display.assert_not_called()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
   absltest.main()

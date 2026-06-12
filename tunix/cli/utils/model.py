@@ -57,9 +57,21 @@ def apply_lora_to_model(base_model, mesh, lora_config, rng_seed=0):
     raise
 
   model_input = base_model.get_model_input()
+
+  # Disable remat during dummy forward pass for LoRA initialization
+  original_remat = None
+  if hasattr(base_model, 'config'):
+    original_remat = getattr(base_model.config, 'remat_config', None)
+    if original_remat is not None:
+      base_model.config.remat_config = 1  # RematConfig.NONE
+
   lora_model = qwix.apply_lora_to_model(
       base_model, lora_provider, rngs=nnx.Rngs(rng_seed), **model_input
   )
+
+  if original_remat is not None:
+    lora_model.config.remat_config = original_remat
+
   if mesh is not None:
     lora_model = reshard.reshard_model_to_mesh(lora_model, mesh)
   return lora_model
