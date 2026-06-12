@@ -114,13 +114,14 @@ class DPOTrainingConfig(peft_trainer.TrainingConfig):
     label_smoothing: Label smoothing factor.
     enable_prompt_loss_orpo: Whether to compute NLL/SFT loss over the full sequence
       (prompt + completion) instead of response/completion only. Supported only
-      with ORPO. (ORPO paper Eq. 2 defines SFT loss over prompt + completion,
-      matching the official implementation by the authors in xfactlab/orpo and
-      Hugging Face TRL which default to computing SFT loss over prompt +
-      completion).
+      with ORPO (silently ignored for DPO). (ORPO paper Eq. 2 defines SFT loss
+      over prompt + completion, matching the official implementation by the
+      authors in xfactlab/orpo and Hugging Face TRL which default to computing
+      SFT loss over prompt + completion).
     average_log_prob_orpo: Whether to use length-averaged log probabilities for SFT
-      and Odds Ratio losses. Supported only with ORPO. (ORPO paper Eq. 3 uses
-      length-averaged log probabilities, matching HF TRL implementation).
+      and Odds Ratio losses. Supported only with ORPO (silently ignored for DPO).
+      (ORPO paper Eq. 3 uses length-averaged log probabilities, matching HF TRL
+      implementation).
   """
 
   algorithm: str = "dpo"  # "dpo" or "orpo"
@@ -129,8 +130,8 @@ class DPOTrainingConfig(peft_trainer.TrainingConfig):
   )
   lambda_orpo: float = 0.1  # Weight for preference loss (ORPO only)
   label_smoothing: float = 0.0
-  enable_prompt_loss_orpo: bool = False
-  average_log_prob_orpo: bool = False
+  enable_prompt_loss_orpo: bool = True
+  average_log_prob_orpo: bool = True
 
   # Should be specified only if your input has strings instead of tokenized IDs.
   max_prompt_length: int | None = None
@@ -243,17 +244,6 @@ class DPOTrainer(peft_trainer.PeftTrainer):
     self.ref_model = ref_model
     self.dpo_config = training_config
     self.algorithm = training_config.algorithm
-    if self.algorithm == "dpo":
-      if training_config.enable_prompt_loss_orpo:
-        raise ValueError(
-            "`enable_prompt_loss_orpo=True` is not supported (and"
-            " mathematically redundant) with the DPO algorithm."
-        )
-      if training_config.average_log_prob_orpo:
-        raise ValueError(
-            "`average_log_prob_orpo=True` is not supported with the DPO"
-            " algorithm."
-        )
     super().__init__(model, optimizer, training_config)
 
     self.tokenizer = (

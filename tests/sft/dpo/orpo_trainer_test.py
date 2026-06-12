@@ -445,36 +445,7 @@ class ORPOTrainerTest(parameterized.TestCase):
       np.testing.assert_allclose(aux["sft_loss"], 0.592339, atol=1e-5)
       np.testing.assert_allclose(aux["or_loss"], 0.787900, atol=1e-5)
 
-  def test_dpo_trainer_invalid_config(self):
-    """Test that trainer raises ValueError for invalid DPO configurations."""
-    model = tc.ToyTransformer(config=tc.ModelConfig(), rngs=nnx.Rngs(0))
-    dpo_config_prompt = orpo_lib.DPOTrainingConfig(
-        algorithm="dpo",
-        enable_prompt_loss_orpo=True,
-        eval_every_n_steps=5,
-        max_steps=10,
-    )
-    with self.assertRaises(ValueError):
-      orpo_lib.DPOTrainer(
-          model=model,
-          ref_model=None,
-          optimizer=optax.sgd(1e-3),
-          training_config=dpo_config_prompt,
-      )
 
-    dpo_config_avg = orpo_lib.DPOTrainingConfig(
-        algorithm="dpo",
-        average_log_prob_orpo=True,
-        eval_every_n_steps=5,
-        max_steps=10,
-    )
-    with self.assertRaises(ValueError):
-      orpo_lib.DPOTrainer(
-          model=model,
-          ref_model=None,
-          optimizer=optax.sgd(1e-3),
-          training_config=dpo_config_avg,
-      )
 
   def test_orpo_prepare_inputs_for_strings(self):
     tokenizer = tc.MockVocab()
