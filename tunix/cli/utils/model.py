@@ -65,9 +65,61 @@ def apply_lora_to_model(base_model, mesh, lora_config):
   return lora_model
 
 
-def create_tokenizer(tokenizer_config, tokenizer_path: str | None):
+def resolve_tokenizer_path(
+    model_config: dict[str, Any],
+    tokenizer_path: str,
+) -> str:
+  """Resolves the tokenizer path dynamically based on model config."""
+  model_source_str = model_config.get('model_source')
+  if not model_source_str:
+    return tokenizer_path
+
+  model_family = naming.ModelNaming(
+      model_name=model_config['model_name']
+  ).model_family
+
+  if model_family == 'gemma3' and model_source_str == 'gcs':
+    if not tokenizer_path or tokenizer_path == _DEFAULT_TOKENIZER_PATH:
+      return 'gs://gemma-data/tokenizers/tokenizer_gemma3.model'
+  elif (
+      model_family in ('gemma', 'gemma1p1', 'gemma2')
+      and model_source_str == 'kaggle'
+  ):
+    model_source = automodel.ModelSource(model_source_str)
+    model_path = model_config.get('model_path')
+    if not model_path:
+      raise ValueError('model_path is required for kaggle source')
+    resolved_model_path = automodel.download_model(
+        model_path, model_config.get('model_download_path'), model_source
+    )
+    if not tokenizer_path or tokenizer_path == _DEFAULT_TOKENIZER_PATH:
+      return os.path.join(resolved_model_path, 'tokenizer.model')
+
+  return tokenizer_path
+
+
+def create_tokenizer(
+    tokenizer_config: dict[str, Any],
+    tokenizer_path: str | None,
+    model_config: dict[str, Any] | None = None,
+):
+  """Creates a tokenizer from the given configuration.
+
+  Args:
+      tokenizer_config: Configuration dictionary for the tokenizer.
+      tokenizer_path: Optional path to the tokenizer.
+      model_config: Optional model configuration dictionary used to resolve
+        paths.
+
+  Returns:
+      A configured Tokenizer object.
+  """
   if not tokenizer_path:
     tokenizer_path = tokenizer_config['tokenizer_path']
+
+  if model_config is not None:
+    tokenizer_path = resolve_tokenizer_path(model_config, tokenizer_path)
+
   tokenizer_type, add_bos, add_eos = (
       tokenizer_config['tokenizer_type'],
       tokenizer_config['add_bos'],
@@ -107,6 +159,7 @@ def create_model(
           - tokenizer_path: The determined path to the tokenizer model.
   """
   tokenizer_path: str = tokenizer_config['tokenizer_path']
+  tokenizer_path = resolve_tokenizer_path(model_config, tokenizer_path)
   model_source_str = model_config['model_source']
 
   # Create Model
@@ -118,7 +171,7 @@ def create_model(
         f'Available sources: {[s.value for s in automodel.ModelSource]}'
     ) from exc
 
-  model, model_path = automodel.AutoModel.from_pretrained(
+  model, _ = automodel.AutoModel.from_pretrained(
       model_id=model_config['model_id'],
       mesh=mesh,
       model_source=model_source,
@@ -132,22 +185,6 @@ def create_model(
       ),
       remat_config=model_config.get('remat_config', 1),
   )
-
-  # Handle Tokenizer Path overrides
-  model_family = naming.ModelNaming(
-      model_name=model_config['model_name']
-  ).model_family
-  if model_family == 'gemma3' and model_source_str == 'gcs':
-    # Use the provided tokenizer path, unless it is the default from base_config
-    if not tokenizer_path or tokenizer_path == _DEFAULT_TOKENIZER_PATH:
-      tokenizer_path = 'gs://gemma-data/tokenizers/tokenizer_gemma3.model'
-  elif (
-      model_family in ('gemma', 'gemma1p1', 'gemma2')
-      and model_source_str == 'kaggle'
-  ):
-    # Use the provided tokenizer path, unless it is the default from base_config
-    if not tokenizer_path or tokenizer_path == _DEFAULT_TOKENIZER_PATH:
-      tokenizer_path = os.path.join(model_path, 'tokenizer.model')
 
   if model_config.get('lora_config'):
     # Apply Lora to model if given lora config

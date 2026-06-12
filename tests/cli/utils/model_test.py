@@ -127,12 +127,40 @@ class ModelTest(parameterized.TestCase):
               'model_name': 'gemma-2-2b',
               'model_source': 'kaggle',
               'model_id': 'google/gemma-2/flax/gemma2-2b',
+              'model_path': 'google/gemma-2/flax/gemma2-2b',
               'model_display': False,
           },
           tokenizer_config={'tokenizer_path': model._DEFAULT_TOKENIZER_PATH},
           expected_tokenizer_path=os.path.join(
               'mock_model_path', 'tokenizer.model'
           ),
+          apply_lora=False,
+          model_display=False,
+      ),
+      dict(
+          testcase_name='gemma3_gcs_custom_tokenizer',
+          model_config={
+              'model_name': 'gemma-3-1b-it',
+              'model_source': 'gcs',
+              'model_id': 'model1',
+              'model_display': False,
+          },
+          tokenizer_config={'tokenizer_path': 'custom_path'},
+          expected_tokenizer_path='custom_path',
+          apply_lora=False,
+          model_display=False,
+      ),
+      dict(
+          testcase_name='gemma_kaggle_custom_tokenizer',
+          model_config={
+              'model_name': 'gemma-2-2b',
+              'model_source': 'kaggle',
+              'model_id': 'google/gemma-2/flax/gemma2-2b',
+              'model_path': 'google/gemma-2/flax/gemma2-2b',
+              'model_display': False,
+          },
+          tokenizer_config={'tokenizer_path': 'custom_path'},
+          expected_tokenizer_path='custom_path',
           apply_lora=False,
           model_display=False,
       ),
@@ -166,10 +194,12 @@ class ModelTest(parameterized.TestCase):
   )
   @mock.patch.object(model, 'apply_lora_to_model', autospec=True)
   @mock.patch.object(automodel, 'AutoModel', autospec=True)
+  @mock.patch.object(automodel, 'download_model', autospec=True)
   @mock.patch.object(nnx, 'display', autospec=True)
   def test_create_model(
       self,
       mock_nnx_display,
+      mock_download_model,
       mock_automodel,
       mock_apply_lora,
       model_config,
@@ -178,6 +208,7 @@ class ModelTest(parameterized.TestCase):
       apply_lora,
       model_display,
   ):
+    mock_download_model.return_value = 'mock_model_path'
     mesh = mock.create_autospec(jax.sharding.Mesh, instance=True, spec_set=True)
     mock_model = mock.create_autospec(nnx.Module, instance=True, spec_set=True)
     mock_automodel.from_pretrained.return_value = (
