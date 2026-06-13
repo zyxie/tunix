@@ -28,7 +28,7 @@ from tunix.models.gemma4 import model as gemma4_model_lib
 from tunix.tests import test_common as tc
 
 
-@dataclasses.dataclass(kw_only=True, frozen=True)
+@dataclasses.dataclass(kw_only=True)
 class ModelConfigWithDtype(tc.ModelConfig):
   dtype: jax.numpy.dtype = jax.numpy.bfloat16
 

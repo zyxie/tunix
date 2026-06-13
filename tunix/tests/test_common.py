@@ -123,7 +123,7 @@ class VisionConfig:
   double_new_line_token: int = 25
 
 
-@dataclasses.dataclass(kw_only=True, frozen=True)
+@dataclasses.dataclass(kw_only=True)
 class ModelConfig:
   """Model config for testing."""
 
@@ -133,6 +133,7 @@ class ModelConfig:
   vocab_size: int = 256
   vision_config: VisionConfig | None = None
   remat_config: int | None = None
+  skip_lm_head: bool = False
 
 
 class ToyTransformer(nnx.Module):
@@ -194,6 +195,8 @@ class ToyTransformer(nnx.Module):
           'all_hidden_states',
           x,
       )
+    if self.config.skip_lm_head:
+      return x, cache
     return self.lm_head(x), cache
 
   @property

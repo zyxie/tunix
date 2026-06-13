@@ -24,6 +24,7 @@ from tunix.tests import test_common as tc
 jax.config.update("jax_threefry_partitionable", False)
 jax.config.update("jax_default_matmul_precision", "highest")
 
+
 class CommonTest(parameterized.TestCase):
 
   @parameterized.named_parameters(
@@ -292,6 +293,84 @@ class CommonTest(parameterized.TestCase):
         logits.shape, (expected_logps.shape[0], expected_logps.shape[1], 256)
     )
 
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="normal",
+          prompt_tokens=np.array([[1, 2, 3, 4], [0, 0, 1, 2], [0, 1, 2, 3]]),
+          completion_tokens=np.array(
+              [[10, 11, -1, 12], [10, 11, 12, 13], [10, 11, 12, -1]]
+          ),
+          segment_ids=None,
+          segment_positions=None,
+      ),
+      dict(
+          testcase_name="seq-packed-single-item",
+          prompt_tokens=np.zeros((3, 0), dtype=np.int32),
+          completion_tokens=np.array([
+              [1, 2, 3, 4, 10, 11, -1, 12],
+              [0, 0, 1, 2, 10, 11, 12, 13],
+              [0, 1, 2, 3, 10, 11, 12, -1],
+          ]),
+          segment_ids=np.ones((3, 8), dtype=np.int32),
+          segment_positions=np.tile(np.arange(8), (3, 1)),
+      ),
+      dict(
+          testcase_name="seq-packed-multi-item",
+          prompt_tokens=np.zeros((2, 0), dtype=np.int32),
+          completion_tokens=np.array([
+              [1, 2, 3, 4, 10, 11, -1, 12, 0, 0, 1, 2, 10, 11, 12, 13],
+              [0, 1, 2, 3, 10, 11, 12, -1, 0, 0, 0, 0, 0, 0, 0, 0],
+          ]),
+          segment_ids=np.array([
+              [1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2],
+              [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+          ]),
+          segment_positions=np.array([
+              [0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7],
+              [0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7],
+          ]),
+      ),
+  )
+  def test_chunked_compute_per_token_logps(
+      self,
+      prompt_tokens,
+      completion_tokens,
+      segment_ids,
+      segment_positions,
+  ):
+    model = tc.ToyTransformer(config=tc.ModelConfig(), rngs=nnx.Rngs(0))
+    graphdef, state = nnx.split(model)
+
+    expected_logps = common.compute_per_token_logps(
+        graphdef,
+        state,
+        prompt_tokens,
+        completion_tokens,
+        pad_id=0,
+        eos_id=-1,
+        return_logits=False,
+        segment_ids=segment_ids,
+        segment_positions=segment_positions,
+    )
+
+    for chunk_size in [2, 4, 8, 16]:
+      chunked_logps = common.chunked_compute_per_token_logps(
+          graphdef,
+          state,
+          prompt_tokens,
+          completion_tokens,
+          pad_id=0,
+          eos_id=-1,
+          return_logits=False,
+          segment_ids=segment_ids,
+          segment_positions=segment_positions,
+          chunk_size=chunk_size,
+      )
+
+      np.testing.assert_allclose(
+          chunked_logps, expected_logps, atol=1e-5, rtol=1e-5
+      )
+
   def test_np_make_completion_mask(self):
     completion_ids = np.array(
         [
@@ -446,7 +525,9 @@ class CommonTest(parameterized.TestCase):
           expected_loss=(0.1 + 0.2) / 4.0 / 1.0,
       ),
       dict(
-          testcase_name="sequence_mean_token_sum_norm_partial_zero_mask_default",
+          testcase_name=(
+              "sequence_mean_token_sum_norm_partial_zero_mask_default"
+          ),
           loss_agg_mode="sequence-mean-token-sum-norm",
           per_token_loss_list=[[0.1, 0.2], [0.3, 0.4]],
           completion_mask_list=[[1, 1], [0, 0]],
