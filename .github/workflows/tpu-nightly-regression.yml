@@ -75,7 +75,7 @@ jobs:
         pip install -r requirements/special_requirements.txt
 
         # reinstall qwix==0.1.6 after tpu-inference is installed
-        pip install --no-deps "qwix==0.1.6"
+        pip install --no-deps "qwix==0.1.6" "flax>=0.12.5"
 
     - name: Verify TPU availability
       run: |
@@ -265,7 +265,6 @@ jobs:
         pip list | egrep 'jax|flax|libtpu'
         cd ..
         git clone https://github.com/sgl-project/sglang-jax.git && cd sglang-jax/python && pip install -e . && cd ../..
-        pip install jax==0.8.1 flax==0.12.0 libtpu==0.0.24
         pip list | egrep 'jax|flax|libtpu'
         cd tunix
         echo "::endgroup::"
@@ -334,7 +333,7 @@ jobs:
         pip install --no-build-isolation "tpu-inference @ git+https://github.com/vllm-project/tpu-inference.git@main"
 
         # reinstall qwix==0.1.6 after tpu-inference is installed
-        pip install --no-deps "qwix==0.1.6"
+        pip install --no-deps "qwix==0.1.6" "flax>=0.12.5"
 
 
     - name: Verify TPU availability
