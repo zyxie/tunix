@@ -233,7 +233,7 @@ class ORPOTrainerTest(parameterized.TestCase):
     model = tc.ToyTransformer(config=tc.ModelConfig(), rngs=nnx.Rngs(0))
     # Use negative log probs (as they should be in reality)
     per_token_logps = -np.abs(np.random.rand(8, 4))
-    completion_mask = np.ones((8, 4))
+    completion_mask = jnp.ones((8, 4))
     token_logps = (per_token_logps * completion_mask).sum(axis=-1)
 
     batch_size = token_logps.shape[0]
@@ -345,7 +345,7 @@ class ORPOTrainerTest(parameterized.TestCase):
     model = tc.ToyTransformer(config=tc.ModelConfig(), rngs=nnx.Rngs(0))
     # Use negative log probs
     per_token_logps = -np.abs(np.random.rand(8, 4))
-    completion_mask = np.ones((8, 4))
+    completion_mask = jnp.ones((8, 4))
     token_logps = (per_token_logps * completion_mask).sum(axis=-1)
 
     batch_size = token_logps.shape[0]
@@ -361,7 +361,7 @@ class ORPOTrainerTest(parameterized.TestCase):
         ref_rejected_logps=None,
         completion_mask=completion_mask,
         logits_to_keep=4,
-        full_mask=np.ones((8, 8)),
+        full_mask=jnp.ones((8, 8)),
     )
 
     with mock.patch.object(
@@ -397,7 +397,7 @@ class ORPOTrainerTest(parameterized.TestCase):
     # Use negative log probs
     per_token_logps = -np.abs(np.random.rand(8, 4))
     # Let's make completion masks have different lengths to truly test division
-    completion_mask = np.array([
+    completion_mask = jnp.array([
         [1, 1, 0, 0],
         [1, 1, 1, 0],
         [1, 1, 1, 1],
