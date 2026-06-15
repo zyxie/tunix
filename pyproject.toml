@@ -42,7 +42,7 @@ dependencies = [
   "sympy",  # Eval result parsing
   "tensorflow_datasets",
   "tqdm",
-  "transformers",
+  "transformers!=4.57.2", # Issue: https://github.com/google/tunix/pull/795
   "tenacity",
 ]
 

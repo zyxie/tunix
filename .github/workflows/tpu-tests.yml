@@ -161,7 +161,6 @@ jobs:
 
           # Install Tunix with dev and test dependencies without overwriting the vLLM dependencies.
           python3 -m pip install -e .[dev,test]
-          python3 -m pip install transformers==4.57.1 --force-reinstall # Issue: https://github.com/google/tunix/pull/795
           # tpu-inference/Numba needs NumPy 2.3 or less.
           python3 -m pip install numpy==2.3.5 --force-reinstall
       - name: Run tunix model tests
