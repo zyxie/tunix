@@ -212,6 +212,9 @@ class MockChatParser:
   def assistant_token(self):
     return "Assistant: "
 
+  def update_assistant_end_tokens(self, tokens):
+    return tokens, 0
+
 
 class _LearnerWithException(agentic_grpo_learner.GRPOLearner):
 
