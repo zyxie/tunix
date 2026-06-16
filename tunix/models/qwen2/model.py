@@ -894,6 +894,7 @@ class Qwen2(BackendMappingMixin, nnx.Module):
       attention_mask: jaxtyping.Array | None = None,  # [B, L, L']
       output_hidden_states: bool = False,
       segment_ids: jaxtyping.Array | None = None,  # [B, L]
+      skip_lm_head: bool = False,
   ) -> tuple[jaxtyping.Array, Cache | None]:
     """Qwen2 model.
 
@@ -903,6 +904,8 @@ class Qwen2(BackendMappingMixin, nnx.Module):
       cache: Attention KV cache or None.
       attention_mask: transformer input mask.
       output_hidden_states: whether to output the hidden states.
+      segment_ids: segment ids for each token in the input sequence.
+      skip_lm_head: whether to skip the final lm head.
 
     Returns:
       predicted_logits, new_cache
@@ -932,15 +935,26 @@ class Qwen2(BackendMappingMixin, nnx.Module):
         new_cache[layer_name] = layer_cache  # pytype: disable=container-type-mismatch
 
     x = self.final_norm(x)
+
     if output_hidden_states:
       self.sow(nnx.Intermediate, 'all_hidden_states', x)
-    # Qwen2.5 0.5B-3B uses tied embedding, sharing weights for input and output.
+
+    if skip_lm_head:
+      return x, new_cache
+
+    logits = self.compute_final_logits(x)
+    return logits, new_cache  # pytype: disable=bad-return-type
+
+  def compute_final_logits(
+      self,
+      x: jaxtyping.Array,
+  ) -> jaxtyping.Array:
+    """Computes the final logits from the model output."""
     if self.config.use_tied_embedding:
       logits = self.embedder.decode(x)
     else:
       logits = self.lm_head(x)
-
-    return jnp.astype(logits, jnp.float32), new_cache  # pytype: disable=bad-return-type
+    return jnp.astype(logits, jnp.float32)
 
   def get_model_input(self):
     """Returns a dummy model input for the transformer.

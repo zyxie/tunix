@@ -140,6 +140,7 @@ class ModelConfig:
   flash_attention_block_size: int = 1024
   use_sliding_window_kv_cache: bool = True
 
+
   # MoE config
   enable_moe: bool = False
   num_experts: int | None = None
@@ -1328,6 +1329,7 @@ class Gemma4(BackendMappingMixin, nnx.Module):
       attention_mask=None,
       segment_ids=None,
       decode_only_last_token=False,
+      skip_lm_head=False,
   ):
     if positions is None:
       B, T = tokens.shape  # pylint: disable=invalid-name
@@ -1384,18 +1386,29 @@ class Gemma4(BackendMappingMixin, nnx.Module):
         new_cache[layer_name] = layer_cache
 
     x = self.final_norm(x)
+    if skip_lm_head:
+      return x, (new_cache if return_cache else None)
+
     if decode_only_last_token:
       # Only compute logits for the last token. This can significantly reduce
       # memory requirements during prefill (when sampling), since we only need
       # the logits for the last token to sample from.
       x = x[:, -1:, :]
-    logits = self.embedder.decode(x).astype(jnp.float32)
 
+    logits = self.compute_final_logits(x)
+
+    return logits, (new_cache if return_cache else None)  # pytype: disable=container-type-mismatch
+
+  def compute_final_logits(
+      self,
+      x: jaxtyping.Array,
+  ) -> jaxtyping.Array:
+    """Computes the final logits from the model output."""
+    logits = self.embedder.decode(x).astype(jnp.float32)
     if self.config.final_logit_softcap is not None:
       logits /= self.config.final_logit_softcap
       logits = jnp.tanh(logits) * self.config.final_logit_softcap
-
-    return logits, (new_cache if return_cache else None)  # pytype: disable=container-type-mismatch
+    return logits
 
   def init_cache(self, batch_size, max_seq_len, dtype):
     cache = {}

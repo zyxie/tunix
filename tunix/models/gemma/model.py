@@ -107,6 +107,7 @@ class ModelConfig:
   shd_config: ShardingConfig = ShardingConfig.get_default_sharding()
   remat_config: RematConfig = RematConfig.NONE
 
+
   @classmethod
   def gemma_2b(cls):
     num_layers = 18
@@ -896,6 +897,7 @@ class Gemma(BackendMappingMixin, nnx.Module):
       cache: Cache | None,  # (sequence length L')
       attention_mask: jaxtyping.Array,  # [B, L, L']
       output_hidden_states: bool = False,
+      skip_lm_head: bool = False,
   ) -> tuple[jaxtyping.Array, Cache | None]:
     """Transformer forward pass.
 
@@ -908,6 +910,7 @@ class Gemma(BackendMappingMixin, nnx.Module):
       cache: Attention KV cache or None.
       attention_mask: transformer input mask.
       output_hidden_states: whether to output the hidden states.
+      skip_lm_head: whether to skip the final lm head.
 
     Returns:
       predicted_logits, new_cache
@@ -932,12 +935,24 @@ class Gemma(BackendMappingMixin, nnx.Module):
     x = self.final_norm(x)
     if output_hidden_states:
       self.sow(nnx.Intermediate, 'all_hidden_states', x)
-    logits = self.embedder.decode(x)
+
+    if skip_lm_head:
+      return x, new_cache
+
+    logits = self.compute_final_logits(x)
+    return logits, new_cache  # pytype: disable=bad-return-type
+
+  def compute_final_logits(
+      self,
+      x: jaxtyping.Array,
+  ) -> jaxtyping.Array:
+    """Computes the final logits from the model output."""
+    logits = self.embedder.decode(x).astype(jnp.float32)
 
     if self.final_logits_softcap is not None:
       logits /= self.final_logits_softcap
       logits = jnp.tanh(logits) * self.final_logits_softcap
-    return logits, new_cache  # pytype: disable=bad-return-type
+    return logits
 
   @property
   def embed_dim(self) -> int:

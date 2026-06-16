@@ -269,7 +269,7 @@ class CommonTest(parameterized.TestCase):
         completion_tokens,
         pad_id=0,
         eos_id=-1,
-        return_logits=False,
+        return_entropy=False,
         segment_ids=segment_ids,
         segment_positions=segment_positions,
     )
@@ -278,20 +278,18 @@ class CommonTest(parameterized.TestCase):
         per_token_logps, expected_logps, atol=1e-4, rtol=1e-4
     )
 
-    _, logits = common.compute_per_token_logps(
+    _, entropy = common.compute_per_token_logps(
         graphdef,
         state,
         prompt_tokens,
         completion_tokens,
         pad_id=0,
         eos_id=-1,
-        return_logits=True,
+        return_entropy=True,
         segment_ids=segment_ids,
         segment_positions=segment_positions,
     )
-    np.testing.assert_equal(
-        logits.shape, (expected_logps.shape[0], expected_logps.shape[1], 256)
-    )
+    np.testing.assert_equal(entropy.shape, expected_logps.shape)
 
   @parameterized.named_parameters(
       dict(
@@ -302,6 +300,7 @@ class CommonTest(parameterized.TestCase):
           ),
           segment_ids=None,
           segment_positions=None,
+          temperature=1.0,
       ),
       dict(
           testcase_name="seq-packed-single-item",
@@ -313,6 +312,7 @@ class CommonTest(parameterized.TestCase):
           ]),
           segment_ids=np.ones((3, 8), dtype=np.int32),
           segment_positions=np.tile(np.arange(8), (3, 1)),
+          temperature=0.7,
       ),
       dict(
           testcase_name="seq-packed-multi-item",
@@ -329,6 +329,7 @@ class CommonTest(parameterized.TestCase):
               [0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7],
               [0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7],
           ]),
+          temperature=1.5,
       ),
   )
   def test_chunked_compute_per_token_logps(
@@ -337,39 +338,60 @@ class CommonTest(parameterized.TestCase):
       completion_tokens,
       segment_ids,
       segment_positions,
+      temperature,
   ):
     model = tc.ToyTransformer(config=tc.ModelConfig(), rngs=nnx.Rngs(0))
     graphdef, state = nnx.split(model)
 
-    expected_logps = common.compute_per_token_logps(
-        graphdef,
-        state,
-        prompt_tokens,
-        completion_tokens,
-        pad_id=0,
-        eos_id=-1,
-        return_logits=False,
-        segment_ids=segment_ids,
-        segment_positions=segment_positions,
-    )
-
-    for chunk_size in [2, 4, 8, 16]:
-      chunked_logps = common.chunked_compute_per_token_logps(
+    for return_entropy in [True, False]:
+      res = common.compute_per_token_logps(
           graphdef,
           state,
           prompt_tokens,
           completion_tokens,
           pad_id=0,
           eos_id=-1,
-          return_logits=False,
+          return_entropy=return_entropy,
           segment_ids=segment_ids,
           segment_positions=segment_positions,
-          chunk_size=chunk_size,
+          temperature=temperature,
+          chunk_size=0,
       )
+      if return_entropy:
+        expected_logps, expected_entropy = res
+      else:
+        expected_logps = res
 
-      np.testing.assert_allclose(
-          chunked_logps, expected_logps, atol=1e-5, rtol=1e-5
-      )
+      for chunk_size in [2, 4, 8, 16]:
+        chunked_res = common.compute_per_token_logps(
+            graphdef,
+            state,
+            prompt_tokens,
+            completion_tokens,
+            pad_id=0,
+            eos_id=-1,
+            return_entropy=return_entropy,
+            segment_ids=segment_ids,
+            segment_positions=segment_positions,
+            temperature=temperature,
+            chunk_size=chunk_size,
+        )
+        if return_entropy:
+          chunked_logps, chunked_entropy = chunked_res
+        else:
+          chunked_logps = chunked_res
+
+        np.testing.assert_allclose(
+            chunked_logps, expected_logps, atol=1e-5, rtol=1e-5
+        )
+        if return_entropy:
+          # NB: skip first one since it's a padded value.
+          np.testing.assert_allclose(
+              chunked_entropy[..., 1:],
+              expected_entropy[..., 1:],
+              atol=1e-5,
+              rtol=1e-5,
+          )
 
   def test_np_make_completion_mask(self):
     completion_ids = np.array(

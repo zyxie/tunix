@@ -79,7 +79,7 @@ class ShardingConfig:
     )
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(slots=True)
 class ModelConfig:
   """Configuration for the Llama3 model."""
 
@@ -95,6 +95,7 @@ class ModelConfig:
   shd_config: ShardingConfig = ShardingConfig.get_default_sharding()
   weight_tying: bool = False  # Llama3.2 features
   remat_config: RematConfig = RematConfig.NONE
+
 
   @classmethod
   def llama3p2_1b(cls):
@@ -625,6 +626,7 @@ class Llama3(BackendMappingMixin, nnx.Module):
       positions: jaxtyping.Array,  # [B, L]
       cache: Cache | None,  # (sequence length L')
       attention_mask: jaxtyping.Array,  # [B, L, L']
+      skip_lm_head: bool = False,
   ) -> tuple[jaxtyping.Array, Cache | None]:
     """Llama3 model.
 
@@ -633,6 +635,7 @@ class Llama3(BackendMappingMixin, nnx.Module):
       positions: input absolute positions.
       cache: Attention KV cache or None.
       attention_mask: transformer input mask.
+      skip_lm_head: whether to skip the final lm head.
 
     Returns:
       predicted_logits, new_cache
@@ -657,12 +660,22 @@ class Llama3(BackendMappingMixin, nnx.Module):
 
     x = self.final_norm(x)
 
+    if skip_lm_head:
+      return x, new_cache
+
+    logits = self.compute_final_logits(x)
+    return logits, new_cache  # pytype: disable=bad-return-type
+
+  def compute_final_logits(
+      self,
+      x: jaxtyping.Array,
+  ) -> jaxtyping.Array:
+    """Computes the final logits from the model output."""
     if self.config.weight_tying:
       logits = self.embedder.decode(x)
     else:
       logits = self.lm_head(x)
-
-    return logits, new_cache  # pytype: disable=bad-return-type
+    return jnp.astype(logits, jnp.float32)
 
   @property
   def num_embed(self) -> int:

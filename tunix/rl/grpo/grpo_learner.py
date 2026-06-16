@@ -182,6 +182,7 @@ class GRPOLearner(rl_learner.RLLearner[TGrpoConfig]):
         algo_config=self.algo_config,
         pad_id=self.rl_cluster.rollout.pad_id(),
         eos_id=self.rl_cluster.rollout.eos_id(),
+        compute_logps_chunk_size=self.rl_cluster.cluster_config.training_config.compute_logps_chunk_size,
     )
 
     self.rl_cluster.actor_trainer.with_loss_fn(

@@ -133,7 +133,6 @@ class ModelConfig:
   vocab_size: int = 256
   vision_config: VisionConfig | None = None
   remat_config: int | None = None
-  skip_lm_head: bool = False
 
 
 class ToyTransformer(nnx.Module):
@@ -165,6 +164,7 @@ class ToyTransformer(nnx.Module):
       output_hidden_states=False,
       images=None,
       segment_ids: jax.Array | None = None,
+      skip_lm_head: bool = False,
   ):
     tokens = x
     x = self.emb(tokens)
@@ -195,9 +195,17 @@ class ToyTransformer(nnx.Module):
           'all_hidden_states',
           x,
       )
-    if self.config.skip_lm_head:
+    if skip_lm_head:
       return x, cache
-    return self.lm_head(x), cache
+    logits = self.compute_final_logits(x)
+    return logits, cache
+
+  def compute_final_logits(
+      self,
+      x,
+  ):
+    """Computes the final logits from the model output."""
+    return self.lm_head(x)
 
   @property
   def num_embed(self) -> int:
@@ -279,8 +287,9 @@ class MockVocab(spm.SentencePieceProcessor):
   }
 
   def __init__(
-      self, mapping_text_to_id: dict[str, int] | None = None,
-      is_multimodal=False
+      self,
+      mapping_text_to_id: dict[str, int] | None = None,
+      is_multimodal=False,
   ):
     super().__init__()
     self._start_id = 3

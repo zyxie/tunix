@@ -33,7 +33,6 @@ from tunix.utils import compat
 from tunix.utils import env_utils
 from tunix.utils import sharding_utils
 
-
 env_utils.setup_sharding_environment()
 
 
@@ -977,6 +976,7 @@ class Gemma3(BackendMappingMixin, nnx.Module):
       cache: Cache | None = None,  # (sequence length L')
       attention_mask: jaxtyping.Array | None = None,  # [B, L, L']
       output_hidden_states: bool = False,
+      skip_lm_head: bool = False,
       *,
       images: jaxtyping.Array | None = None,  # [B, H, W, C] or [B, N, H, W, C]
   ) -> tuple[jaxtyping.Array, Cache | None]:
@@ -991,6 +991,7 @@ class Gemma3(BackendMappingMixin, nnx.Module):
       cache: Attention KV cache or None.
       attention_mask: transformer input mask.
       output_hidden_states: whether to output the hidden states.
+      skip_lm_head: whether to skip the final lm head.
       images: Input images. If None, the model will not process images.
 
     Returns:
@@ -1021,9 +1022,20 @@ class Gemma3(BackendMappingMixin, nnx.Module):
     x = self.final_norm(x)
     if output_hidden_states:
       self.sow(nnx.Intermediate, 'all_hidden_states', x)
-    logits = self.embedder.decode(x)
 
+    if skip_lm_head:
+      return x, new_cache
+
+    logits = self.compute_final_logits(x)
     return logits, new_cache  # pytype: disable=bad-return-type
+
+  def compute_final_logits(
+      self,
+      x: jaxtyping.Array,
+  ) -> jaxtyping.Array:
+    """Computes the final logits from the model output."""
+    logits = self.embedder.decode(x).astype(jnp.float32)
+    return logits
 
   def _encode_and_get_inputs(
       self,
@@ -1137,8 +1149,9 @@ class Gemma3(BackendMappingMixin, nnx.Module):
   ):
     """Returns the positions and attention mask for the transformer."""
     token_placeholder_id = (
-        None if self.config.vision_config is None else
-        self.config.vision_config.soft_token_placeholder
+        None
+        if self.config.vision_config is None
+        else self.config.vision_config.soft_token_placeholder
     )
     return utils.get_attention_mask(
         tokens,

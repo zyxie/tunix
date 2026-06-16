@@ -68,7 +68,6 @@ class InferenceWorker:
         pad_id=pad_id,
         eos_id=eos_id,
         stop_gradient=True,
-        return_logits=False,
         temperature=temperature,
     )
 

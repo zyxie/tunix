@@ -525,6 +525,92 @@ class AgenticGrpoLearnerTest(parameterized.TestCase):
       # So update_actor should be called 2 * 2 = 4 times!
       self.assertEqual(mock_update_actor.call_count, 4)
 
+  def test_compute_logps_chunk_size(self):
+    vocab = test_common.MockVocab()
+    tokenizer = tokenizer_adapter.TokenizerAdapter(vocab)
+    model = test_common.ToyTransformer(
+        config=test_common.ModelConfig(vocab_size=vocab.GetPieceSize()),
+        rngs=nnx.Rngs(0),
+    )
+    ref_model = test_common.ToyTransformer(
+        config=test_common.ModelConfig(vocab_size=vocab.GetPieceSize()),
+        rngs=nnx.Rngs(0),
+    )
+
+    mesh = pxla.thread_resources.env.physical_mesh
+    cluster_config = rl_cluster_lib.ClusterConfig(
+        role_to_mesh={
+            rl_cluster_lib.Role.ACTOR: mesh,
+            rl_cluster_lib.Role.REFERENCE: mesh,
+            rl_cluster_lib.Role.ROLLOUT: mesh,
+        },
+        rollout_engine="vanilla",
+        offload_to_cpu=False,
+        training_config=rl_cluster_lib.RLTrainingConfig(
+            actor_optimizer=optax.sgd(1e-3),
+            eval_every_n_steps=100,
+            max_steps=1,
+            mini_batch_size=2,
+            train_micro_batch_size=2,
+            compute_logps_micro_batch_size=2,
+            compute_logps_chunk_size=4,
+        ),
+        rollout_config=base_rollout.RolloutConfig(
+            max_prompt_length=256,
+            max_tokens_to_generate=10,
+            return_logprobs=True,
+            kv_cache_size=1024,
+        ),
+    )
+    rl_cluster = rl_cluster_lib.RLCluster(
+        actor=model,
+        reference=ref_model,
+        tokenizer=tokenizer,
+        cluster_config=cluster_config,
+    )
+
+    grpo_config = agentic_grpo_learner.GRPOConfig(
+        num_generations=2,
+        num_iterations=1,
+        loss_algo="grpo",
+        max_response_length=10,
+    )
+    grpo_learner = agentic_grpo_learner.GRPOLearner(
+        rl_cluster=rl_cluster,
+        reward_fns=reward_fn_1,
+        algo_config=grpo_config,
+        metric_fns=[lambda **kwargs: {"test_metric": (1.0, np.mean)}],
+        chat_parser=MockChatParser(),
+    )
+
+    train_ds = _dummy_dataset(
+        MySource(data=["1", "2"], repeat=1), batch_size=2
+    )
+
+    with (
+        mock.patch.object(
+            rl_common,
+            "compute_per_token_logps",
+            wraps=rl_common.compute_per_token_logps,
+        ) as mock_compute_logps,
+        mock.patch.object(
+            rl_cluster,
+            "generate",
+            side_effect=self._mock_generate,
+        ),
+    ):
+      grpo_learner.train(train_ds)
+
+      # Ensure compute_per_token_logps was called.
+      self.assertGreater(mock_compute_logps.call_count, 0)
+
+      # Verify that at least one call passed chunk_size=4.
+      chunk_sizes = [
+          call.kwargs.get("chunk_size")
+          for call in mock_compute_logps.call_args_list
+      ]
+      self.assertIn(4, chunk_sizes)
+
   @parameterized.parameters("grpo", "gspo-token")
   def test_grpo_loss_fn(self, loss_algo):
     batch_size, seq_len = 2, 8

@@ -157,21 +157,6 @@ def masked_var(
   return variance * bessel_corr
 
 
-def compute_entropy_from_logits(logits: jax.Array) -> jax.Array:
-  """Computes the entropy of a distribution given its logits.
-
-  Args:
-    logits: Logits as returned by the model. Of shape `[batch_size, seq_len,
-      emb_dim]`.
-
-  Returns:
-    A JAX array of shape `[batch_size, seq_len]`, containing the entropy values.
-  """
-  log_probs = jax.nn.log_softmax(logits, axis=-1)
-  probs = jax.nn.softmax(log_probs)
-  return -jnp.sum(probs * log_probs, axis=-1)
-
-
 # ==============================================================================
 # PPO Core
 # ==============================================================================
@@ -194,8 +179,9 @@ def ppo_policy_loss_fn(
   completion_ids = train_example.completion_ids
   completion_mask = train_example.completion_mask
 
+  return_entropy = entropy_coef is not None and entropy_coef != 0.0
   graphdef, state = nnx.split(model)
-  per_token_logps, logits = common.compute_per_token_logps(
+  outputs = common.compute_per_token_logps(
       graphdef,
       state,
       prompt_tokens=train_example.prompt_ids,
@@ -203,10 +189,16 @@ def ppo_policy_loss_fn(
       pad_id=pad_id,
       eos_id=eos_id,
       stop_gradient=False,
-      return_logits=True,
+      return_entropy=return_entropy,
       segment_ids=getattr(train_example, "segment_ids", None),
       segment_positions=getattr(train_example, "segment_positions", None),
+      chunk_size=kwargs.get("compute_logps_chunk_size", 0),
   )
+  if return_entropy:
+    per_token_logps, token_entropy = outputs
+  else:
+    per_token_logps = outputs
+
 
   advantages = train_example.advantages
   old_per_token_logps = train_example.old_per_token_logps
@@ -246,8 +238,7 @@ def ppo_policy_loss_fn(
   policy_loss = masked_mean(pg_losses, completion_mask)
   loss = policy_loss
 
-  if entropy_coef is not None and entropy_coef != 0.0:
-    token_entropy = compute_entropy_from_logits(logits)
+  if return_entropy:
     entropy_loss = masked_mean(token_entropy, completion_mask)
     loss = loss - entropy_coef * entropy_loss
     aux["loss/entropy"] = entropy_loss
@@ -383,7 +374,7 @@ def grpo_loss_fn(
 
   # TODO(tsbao): split can be avoided with updated peft_trainer model handling.
   graphdef, state = nnx.split(model)
-  per_token_logps, logits = common.compute_per_token_logps(
+  per_token_logps, token_entropy = common.compute_per_token_logps(
       graphdef,
       state,
       prompt_tokens=train_example.prompt_ids,
@@ -391,10 +382,11 @@ def grpo_loss_fn(
       pad_id=pad_id,
       eos_id=eos_id,
       stop_gradient=False,
-      return_logits=True,
+      return_entropy=True,
       segment_ids=getattr(train_example, "segment_ids", None),
       segment_positions=getattr(train_example, "segment_positions", None),
       temperature=algo_config.temperature,
+      chunk_size=kwargs.get("compute_logps_chunk_size", 0),
   )
   per_token_logps = jnp.astype(per_token_logps, jnp.float32)
   # TODO(tsbao): We should handle token level advantages.
@@ -536,7 +528,6 @@ def grpo_loss_fn(
     if beta is not None and beta != 0.0:
       loss = loss + beta * kl_loss
 
-  token_entropy = compute_entropy_from_logits(logits)
   entropy_loss = common.aggregate_loss(
       token_entropy, completion_mask, loss_aggregation_mode
   )

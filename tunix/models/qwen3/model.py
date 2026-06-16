@@ -153,6 +153,7 @@ class ModelConfig:
   use_flash_attention: bool = False
   flash_attention_block_size: int = 1024
 
+
   @classmethod
   def qwen3_0p6b(cls):  # qwen3-0.6B
     return cls(
@@ -1197,6 +1198,7 @@ class Qwen3(BackendMappingMixin, nnx.Module):
       attention_mask: jaxtyping.Array,  # [B, L, L']
       output_hidden_states: bool = False,
       segment_ids: jaxtyping.Array | None = None,  # [B, L]
+      skip_lm_head: bool = False,
   ) -> tuple[jaxtyping.Array, Cache | None]:
     """Qwen3 model.
 
@@ -1211,6 +1213,7 @@ class Qwen3(BackendMappingMixin, nnx.Module):
         to pad-token, or sequence-packing across document boundaries). Pass a
         1/0 mask to skip pad positions; pass increasing integer ids per packed
         document for sequence packing.
+      skip_lm_head: whether to skip the final lm head.
 
     Returns:
       predicted_logits, new_cache
@@ -1237,12 +1240,24 @@ class Qwen3(BackendMappingMixin, nnx.Module):
     x = self.final_norm(x)
     if output_hidden_states:
       self.sow(nnx.Intermediate, 'all_hidden_states', x)
+
+    if skip_lm_head:
+      return x, new_cache
+
+    logits = self.compute_final_logits(x)
+
+    return logits, new_cache  # pytype: disable=bad-return-type
+
+  def compute_final_logits(
+      self,
+      x: jaxtyping.Array,
+  ) -> jaxtyping.Array:
+    """Computes the final logits from the model output."""
     if self.config.use_tied_embedding:
       logits = self.embedder.decode(x)
     else:
       logits = self.lm_head(x)
-
-    return jnp.astype(logits, jnp.float32), new_cache  # pytype: disable=bad-return-type
+    return jnp.astype(logits, jnp.float32)
 
   def get_model_input(self):
     """Returns a dummy model input for the transformer.
