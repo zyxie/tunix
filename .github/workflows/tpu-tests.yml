@@ -157,7 +157,7 @@ jobs:
         run: |
           echo "Current directory:"
           pwd
-          python3 -m pip install --upgrade pip setuptools wheel kagglehub kagglesdk
+          python3 -m pip install --upgrade pip setuptools wheel
 
           # Install Tunix with dev and test dependencies without overwriting the vLLM dependencies.
           python3 -m pip install -e .[dev,test]

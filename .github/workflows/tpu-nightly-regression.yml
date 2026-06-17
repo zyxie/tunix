@@ -67,15 +67,13 @@ jobs:
 
     - name: Install tunix dependencies
       run: |
-        pip install -e .[prod,test,cli]
+        python3 -m pip install --upgrade pip setuptools wheel
 
-        # override vLLM and tpu-inference
-        export VLLM_TARGET_DEVICE=tpu
-        pip install -r requirements/requirements.txt
-        pip install -r requirements/special_requirements.txt
+        # Install Tunix with dev and test dependencies without overwriting the vLLM dependencies.
+        python3 -m pip install -e .[dev,test,cli]
 
-        # reinstall qwix==0.1.6 after tpu-inference is installed
-        pip install --no-deps "qwix==0.1.6" "flax>=0.12.5"
+        # tpu-inference/Numba needs NumPy 2.3 or less.
+        python3 -m pip install numpy==2.3.5 --force-reinstall
 
     - name: Verify TPU availability
       run: |
