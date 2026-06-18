@@ -161,31 +161,6 @@ def factorized_posemb(posemb: jax.Array, positions_xy: jax.Array) -> jax.Array:
   return jnp.sum(pe_seq, axis=0)
 
 
-def patchify(images: jax.Array, patch_size: int) -> tuple[jax.Array, jax.Array]:
-  shape = images.shape
-  batch_dims = shape[:-3]
-  H, W, C = shape[-3:]
-  h = H // patch_size
-  w = W // patch_size
-
-  x = jnp.reshape(images, batch_dims + (h, patch_size, w, patch_size, C))
-  perm = list(range(len(batch_dims))) + [
-      len(batch_dims),
-      len(batch_dims) + 2,
-      len(batch_dims) + 1,
-      len(batch_dims) + 3,
-      len(batch_dims) + 4,
-  ]
-  x = jnp.transpose(x, perm)
-  patches = jnp.reshape(x, batch_dims + (h * w, patch_size * patch_size * C))
-
-  xy = jnp.meshgrid(jnp.arange(w), jnp.arange(h))
-  positions_xy = jnp.stack(xy, axis=-1)
-  positions_xy = jnp.reshape(positions_xy, (h * w, 2))
-  positions_xy = jnp.broadcast_to(positions_xy, batch_dims + (h * w, 2))
-  return patches, positions_xy
-
-
 def avg_pool_by_positions(
     x: jax.Array,
     positions_xy: jax.Array,
