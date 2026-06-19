@@ -269,7 +269,7 @@ class ModelTest(absltest.TestCase):
         output_length=5,
         use_clipped_linears=True,
     )
-    config.use_bidirectional_attention = 'vision'
+    config.use_bidirectional_attention = "vision"
 
     rngs = nnx.Rngs(0)
     model = model_lib.Gemma4(config, rngs=rngs, text_only=False)
@@ -305,6 +305,77 @@ class ModelTest(absltest.TestCase):
         images=images,
     )
     self.assertEqual(logits.shape, (1, 32, config.num_embed))
+
+  def test_forward_pass_vision_batch(self):
+    config = model_lib.ModelConfig.gemma4_26b_a4b()
+    config.num_layers = 1
+    config.embed_dim = 256
+    config.hidden_dim = 512
+    config.num_heads = 4
+    config.head_dim = 64
+    config.num_kv_heads = 1
+    config.num_experts = 4
+    config.num_experts_per_tok = 2
+    config.expert_dim = 128
+    config.vision_encoder = model_lib.vision.VisionEncoderConfig(
+        d_model=64,
+        num_layers=1,
+        num_heads=2,
+        ffw_hidden=128,
+        patch_size=4,
+        output_length=5,
+        use_clipped_linears=True,
+    )
+    config.use_bidirectional_attention = "vision"
+
+    rngs = nnx.Rngs(0)
+    model = model_lib.Gemma4(config, rngs=rngs, text_only=False)
+
+    batch_size = 2
+    seq_len = 32
+    tokens = jax.random.randint(
+        jax.random.PRNGKey(0), (batch_size, seq_len), 0, config.num_embed
+    )
+    # Image placeholders: token shape represents visual soft tokens within sequences.
+    tokens = tokens.at[0, 10:15].set(model_lib.TOKEN_PLACEHOLDER)
+    tokens = tokens.at[1, 5:8].set(model_lib.TOKEN_PLACEHOLDER)
+    tokens = tokens.at[1, 20:25].set(model_lib.TOKEN_PLACEHOLDER)
+
+    positions = jnp.tile(
+        jnp.arange(tokens.shape[1])[None, :], (tokens.shape[0], 1)
+    )
+    attn_mask = jnp.tril(
+        jnp.ones((tokens.shape[1], tokens.shape[1]), dtype=jnp.bool_)
+    )[None, ...]
+    attn_mask = jnp.broadcast_to(attn_mask, (batch_size, seq_len, seq_len))
+
+    # Test batched vision inputs
+    soft_token_counts = ((5,), (3, 5))
+    max_n_images = 2
+    max_patches = config.vision_encoder.max_patches
+    patch_dim = config.vision_encoder.patch_size**2 * 3
+
+    # Dimensions for patches: (batch, max_n_images * max_patches, patch_dim)
+    patches = jnp.zeros(
+        (batch_size, max_n_images * max_patches, patch_dim), dtype=jnp.float32
+    )
+    positions_xy = jnp.full(
+        (batch_size, max_n_images * max_patches, 2), -1, dtype=jnp.int32
+    )
+
+    images = model_lib.PreprocessedVisionInput(
+        patches=patches,
+        positions_xy=positions_xy,
+        soft_token_counts=soft_token_counts,
+    )
+
+    logits, _ = model(
+        tokens,
+        positions=positions,
+        attention_mask=attn_mask,
+        images=images,
+    )
+    self.assertEqual(logits.shape, (batch_size, seq_len, config.num_embed))
 
 
 if __name__ == "__main__":

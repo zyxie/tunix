@@ -45,7 +45,7 @@ TOKEN_PLACEHOLDER = -2
 class PreprocessedVisionInput:
   patches: Any
   positions_xy: Any
-  soft_token_counts: tuple[int, ...]
+  soft_token_counts: tuple[int, ...] | tuple[tuple[int, ...], ...]
 
 
 jax.tree_util.register_dataclass(
@@ -1593,32 +1593,65 @@ class Gemma4(BackendMappingMixin, nnx.Module):
     """Encode images into the same space as the text embeddings."""
     assert self.vision_encoder is not None
 
-    n_images = len(vision_input.soft_token_counts)
+    batch_size = vision_input.patches.shape[0]
+
+    if len(vision_input.soft_token_counts) > 0 and isinstance(
+        vision_input.soft_token_counts[0], int
+    ):
+      soft_token_counts = (vision_input.soft_token_counts,)
+    else:
+      soft_token_counts = vision_input.soft_token_counts
+
+    max_n_images = max((len(counts) for counts in soft_token_counts), default=0)
+    if max_n_images == 0:
+      return jnp.zeros((batch_size, 0, self.config.embed_dim))
+
     patches = vision_input.patches
     positions_xy = vision_input.positions_xy
-    max_patches = patches.shape[1] // n_images
+    max_patches = patches.shape[1] // max_n_images
 
-    patches = jnp.reshape(patches, (n_images, max_patches, patches.shape[2]))
+    patches = jnp.reshape(
+        patches, (batch_size * max_n_images, max_patches, patches.shape[2])
+    )
     positions_xy = jnp.reshape(
-        positions_xy, (n_images, max_patches, positions_xy.shape[2])
+        positions_xy, (batch_size * max_n_images, max_patches, positions_xy.shape[2])
     )
 
     encoder_outputs = self.vision_encoder(patches, positions_xy)
 
     embeddings, mask = encoder_outputs[0]
 
-    per_image_tokens = []
-    for i in range(n_images):
-      expected_count = vision_input.soft_token_counts[i]
-      if mask is not None:
-        valid_indices = jnp.nonzero(mask[i], size=expected_count)[0]
-        real_tokens = embeddings[i][valid_indices]
-      else:
-        real_tokens = embeddings[i][:expected_count]
-      per_image_tokens.append(real_tokens)
+    batch_tokens = []
+    max_tokens_per_batch = 0
+    for b in range(batch_size):
+      per_image_tokens = []
+      counts = soft_token_counts[b] if b < len(soft_token_counts) else ()
+      for i in range(len(counts)):
+        idx = b * max_n_images + i
+        expected_count = counts[i]
+        if mask is not None:
+          valid_indices = jnp.nonzero(mask[idx], size=expected_count)[0]
+          real_tokens = embeddings[idx][valid_indices]
+        else:
+          real_tokens = embeddings[idx][:expected_count]
+        per_image_tokens.append(real_tokens)
 
-    all_tokens = jnp.concatenate(per_image_tokens, axis=0)
-    all_tokens = self.embedder.encode_vision(all_tokens[None, None, :, :])
+      if per_image_tokens:
+        b_tokens = jnp.concatenate(per_image_tokens, axis=0)
+      else:
+        b_tokens = jnp.zeros((0, embeddings.shape[-1]))
+      batch_tokens.append(b_tokens)
+      max_tokens_per_batch = max(max_tokens_per_batch, b_tokens.shape[0])
+
+    padded_batch_tokens = []
+    for b_tokens in batch_tokens:
+      pad_len = max_tokens_per_batch - b_tokens.shape[0]
+      if pad_len > 0:
+        b_tokens = jnp.pad(b_tokens, ((0, pad_len), (0, 0)))
+      padded_batch_tokens.append(b_tokens)
+
+    all_tokens = jnp.stack(padded_batch_tokens, axis=0)
+    all_tokens = self.embedder.encode_vision(all_tokens[:, None, :, :])
     all_tokens = all_tokens[:, 0, :, :]
     return all_tokens
 

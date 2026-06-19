@@ -417,7 +417,7 @@ def preprocess_and_patchify(
 def add_variable_extra_tokens_for_images(
     tokens: np.ndarray,
     *,
-    soft_token_counts: list[int],
+    soft_token_counts: list[int] | tuple[tuple[int, ...], ...],
     placeholder_token: int = 258880,
     start_token: int = 255999,
     end_token: int = 258882,
@@ -432,9 +432,15 @@ def add_variable_extra_tokens_for_images(
     row = tokens[b].tolist()
     expanded = []
     image_idx = 0
+
+    if len(soft_token_counts) > 0 and isinstance(soft_token_counts[0], int):
+      counts = soft_token_counts
+    else:
+      counts = soft_token_counts[b] if b < len(soft_token_counts) else ()
+
     for token in row:
-      if token == placeholder_token and image_idx < len(soft_token_counts):
-        count = soft_token_counts[image_idx]
+      if token == placeholder_token and image_idx < len(counts):
+        count = counts[image_idx]
         expanded.append(double_new_line_token)
         expanded.append(start_token)
         expanded.extend([soft_token_placeholder] * count)
@@ -461,33 +467,106 @@ def process_gemma4_inputs(
 ) -> tuple[Any, list[np.ndarray]]:
   """Processes images and tokens for Gemma4 multimodal models."""
 
-  patches, positions_xy, soft_token_counts = preprocess_and_patchify(
-      images,
-      patch_size=vision_encoder.config.patch_size,
-      max_soft_tokens=vision_encoder.config.num_mm_tokens_per_image,
-      pooling_kernel_size=vision_encoder.config.pooling_kernel_size,
-  )
-  n_images = patches.shape[0]
-  max_patches = patches.shape[1]
-  patches = jnp.reshape(patches, (1, n_images * max_patches, patches.shape[2]))
-  positions_xy = jnp.reshape(
-      positions_xy, (1, n_images * max_patches, positions_xy.shape[2])
-  )
+  if not isinstance(images, list):
+    images = [[images]]
+  elif len(images) > 0 and not isinstance(images[0], list):
+    images = [[img] for img in images]
+
+  max_n_images = max((len(batch) for batch in images), default=0)
+
+  batch_patches = []
+  batch_positions = []
+  all_soft_token_counts = []
+
+  max_patches_per_image = 0
+
+  for batch in images:
+    if not batch:
+      batch_patches.append(None)
+      batch_positions.append(None)
+      all_soft_token_counts.append(())
+      continue
+
+    patches, positions_xy, soft_token_counts = preprocess_and_patchify(
+        batch,
+        patch_size=vision_encoder.config.patch_size,
+        max_soft_tokens=vision_encoder.config.num_mm_tokens_per_image,
+        pooling_kernel_size=vision_encoder.config.pooling_kernel_size,
+    )
+    batch_patches.append(patches)
+    batch_positions.append(positions_xy)
+    all_soft_token_counts.append(tuple(soft_token_counts))
+    max_patches_per_image = max(max_patches_per_image, patches.shape[1])
+
+  if max_patches_per_image == 0:
+    max_patches_per_image = (
+        vision_encoder.config.num_mm_tokens_per_image
+        * vision_encoder.config.pooling_kernel_size**2
+    )
+
+  final_patches = []
+  final_positions = []
+  patch_dim = 3 * (vision_encoder.config.patch_size**2)
+
+  for b_idx in range(len(images)):
+    if batch_patches[b_idx] is not None:
+      p = batch_patches[b_idx]
+      xy = batch_positions[b_idx]
+      assert p is not None
+      assert xy is not None
+      patch_dim = p.shape[-1]
+    else:
+      p = jnp.zeros((0, max_patches_per_image, patch_dim), dtype=jnp.float32)
+      xy = jnp.full(
+          (0, max_patches_per_image, 2), POSITIONS_PAD_VALUE, dtype=jnp.int32
+      )
+
+    n_pad = max_n_images - p.shape[0]
+    if n_pad > 0:
+      pad_p = jnp.zeros(
+          (n_pad, max_patches_per_image, patch_dim), dtype=p.dtype
+      )
+      pad_xy = jnp.full(
+          (n_pad, max_patches_per_image, 2), POSITIONS_PAD_VALUE, dtype=xy.dtype
+      )
+      p = jnp.concatenate([p, pad_p], axis=0)
+      xy = jnp.concatenate([xy, pad_xy], axis=0)
+
+    p = jnp.reshape(p, (max_n_images * max_patches_per_image, patch_dim))
+    xy = jnp.reshape(xy, (max_n_images * max_patches_per_image, 2))
+
+    final_patches.append(p)
+    final_positions.append(xy)
+
+  if final_patches:
+    patches = jnp.stack(final_patches, axis=0)
+    positions_xy = jnp.stack(final_positions, axis=0)
+  else:
+    batches = len(images)
+    patches = jnp.zeros(
+        (batches, max_n_images * max_patches_per_image, patch_dim),
+        dtype=jnp.float32,
+    )
+    positions_xy = jnp.full(
+        (batches, max_n_images * max_patches_per_image, 2),
+        POSITIONS_PAD_VALUE,
+        dtype=jnp.int32,
+    )
 
   processed_images = PreprocessedVisionInput(
       patches=patches,
       positions_xy=positions_xy,
-      soft_token_counts=tuple(soft_token_counts),
+      soft_token_counts=tuple(all_soft_token_counts),
   )
 
-  if soft_token_counts:
+  if all_soft_token_counts:
     max_len = max(len(t) for t in tokens)
     padded_tokens = np.array([
         np.pad(x, (0, max_len - len(x)), constant_values=pad_id) for x in tokens
     ])
     expanded_tokens = add_variable_extra_tokens_for_images(
         padded_tokens,
-        soft_token_counts=soft_token_counts,
+        soft_token_counts=tuple(all_soft_token_counts),
     )
     tokens = [
         np.array([tid for tid in row if tid != pad_id])

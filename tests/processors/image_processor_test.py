@@ -313,6 +313,57 @@ class ImageProcessorTest(parameterized.TestCase):
     expected_patch_10 = images[0, :16, 16:, :].reshape(-1)
     np.testing.assert_array_equal(patches[0, 1, :], expected_patch_10)
 
+  def test_process_gemma4_inputs_batch(self):
+    class _DummyVisionConfig:
+      patch_size = 16
+      num_mm_tokens_per_image = 10
+      pooling_kernel_size = 3
+
+    class _DummyVisionEncoder:
+      config = _DummyVisionConfig()
+
+    img1 = np.zeros((100, 100, 3), dtype=np.uint8)
+    img2 = np.zeros((50, 50, 3), dtype=np.uint8)
+    img3 = np.zeros((200, 200, 3), dtype=np.uint8)
+
+    images = [[img1, img2], [img3]]
+    tokens = [
+        np.array([1, 2, 258880, 258880, 4, 5]),
+        np.array([10, 258880, 20]),
+    ]
+    vision_encoder = _DummyVisionEncoder()
+
+    processed_images, new_tokens = image_processor.process_gemma4_inputs(
+        images=images,
+        tokens=tokens,
+        vision_encoder=vision_encoder,
+        pad_id=0,
+    )
+
+    self.assertEqual(processed_images.patches.shape, (2, 180, 768))
+    self.assertEqual(processed_images.positions_xy.shape, (2, 180, 2))
+
+    self.assertLen(processed_images.soft_token_counts, 2)
+    self.assertEqual(processed_images.soft_token_counts[0], (9, 9))
+    self.assertEqual(processed_images.soft_token_counts[1], (9,))
+
+    self.assertLen(new_tokens, 2)
+    expected_tokens_0 = np.array(
+        [1, 2]
+        + [108, 255999]
+        + [-2] * 9
+        + [258882, 108]
+        + [108, 255999]
+        + [-2] * 9
+        + [258882, 108]
+        + [4, 5]
+    )
+    expected_tokens_1 = np.array(
+        [10] + [108, 255999] + [-2] * 9 + [258882, 108] + [20]
+    )
+    np.testing.assert_array_equal(new_tokens[0], expected_tokens_0)
+    np.testing.assert_array_equal(new_tokens[1], expected_tokens_1)
+
 
 if __name__ == '__main__':
   absltest.main()
