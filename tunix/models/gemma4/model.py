@@ -93,6 +93,7 @@ class ShardingConfig:
   per_layer_input_gate: Tuple[str | None, ...]
   per_layer_projection: Tuple[str | None, ...]
   per_layer_input_embedding: Tuple[str | None, ...]
+  vision_shd: vision.VisionShardingConfig | None = None
 
   @staticmethod
   def get_default_sharding(is_sampling: bool = False):
@@ -118,6 +119,7 @@ class ShardingConfig:
         per_layer_input_gate=(fsdp, 'tp'),
         per_layer_projection=('tp', fsdp),
         per_layer_input_embedding=('tp', None, fsdp),
+        vision_shd=vision.VisionShardingConfig.get_default_sharding(is_sampling),
     )
 
 
@@ -1431,6 +1433,7 @@ class Gemma4(BackendMappingMixin, nnx.Module):
           rngs=rngs,
           config=config.vision_encoder,
           param_dtype=config.param_dtype,
+          shd_config=config.shd_config.vision_shd,
       )
 
     pattern = (

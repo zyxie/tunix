@@ -15,11 +15,56 @@
 """Vision encoder for Gemma4 using Flax NNX."""
 
 import dataclasses
-from typing import Any
+from typing import Any, Tuple
 from flax import nnx
 import jax
 import jax.numpy as jnp
 from tunix.utils import compat
+from tunix.utils import sharding_utils
+
+
+@dataclasses.dataclass(slots=True, frozen=True)
+class VisionShardingConfig:
+  """Sharding configuration for vision encoder."""
+
+  emb_patch_kernel: Tuple[str | None, ...]
+  emb_pos_kernel: Tuple[str | None, ...]
+
+  attn_q_kernel: Tuple[str | None, ...]
+  attn_kv_kernel: Tuple[str | None, ...]
+  attn_out_kernel: Tuple[str | None, ...]
+
+  ffw_gate_kernel: Tuple[str | None, ...]
+  ffw_out_kernel: Tuple[str | None, ...]
+
+  rms_norm_weight: Tuple[str | None, ...]
+
+  # Activation sharding
+  act_btd: Tuple[str | None, ...]
+  act_btf: Tuple[str | None, ...]
+  act_btnh: Tuple[str | None, ...]
+  act_bskh: Tuple[str | None, ...]
+  act_bkgts: Tuple[str | None, ...]
+
+  @staticmethod
+  def get_default_sharding(is_sampling: bool = False):
+    fsdp = 'fsdp' if not is_sampling else None
+    return VisionShardingConfig(
+        emb_patch_kernel=(None, 'tp'),
+        emb_pos_kernel=(None, None, 'tp'),
+        attn_q_kernel=('tp', fsdp, None),
+        attn_kv_kernel=(None, 'tp', fsdp, None),
+        attn_out_kernel=('tp', None, fsdp),
+        ffw_gate_kernel=(None, fsdp, 'tp'),
+        ffw_out_kernel=(fsdp, 'tp'),
+        rms_norm_weight=('tp',),
+        act_btd=('fsdp', None, None if is_sampling else 'tp'),
+        act_btf=('fsdp', None, 'tp'),
+        act_btnh=('fsdp', None, 'tp', None),
+        act_bskh=('fsdp', None, 'tp', None),
+        act_bkgts=('fsdp', 'tp', None, None, None),
+    )
+
 
 POSITIONS_PAD_VALUE = -1
 TOKEN_PLACEHOLDER = -2
@@ -190,6 +235,7 @@ class Einsum(nnx.Module):
       param_dtype: jnp.dtype = jnp.float32,
       w_scale: float | None = None,
       initializer: Any = None,
+      sharding: tuple[str | None, ...] | None = None,
   ):
     self.dtype = dtype
     self.w_scale = w_scale
@@ -197,6 +243,7 @@ class Einsum(nnx.Module):
       initializer = nnx.initializers.normal()
     self.w = nnx.Param(
         initializer(rngs.params(), shape).astype(param_dtype),
+        sharding=sharding,
     )
 
   def __call__(self, equation: str, x: jax.Array) -> jax.Array:
@@ -220,6 +267,7 @@ class ClippedEinsum(nnx.Module):
       param_dtype: jnp.dtype = jnp.float32,
       w_scale: float | None = None,
       initializer: Any = None,
+      sharding: tuple[str | None, ...] | None = None,
   ):
     self.dtype = dtype
     self.w_scale = w_scale
@@ -227,6 +275,7 @@ class ClippedEinsum(nnx.Module):
       initializer = nnx.initializers.normal()
     self.w = nnx.Param(
         initializer(rngs.params(), shape).astype(param_dtype),
+        sharding=sharding,
     )
     self.clip_input_min = nnx.Param(jnp.array(-float('inf'), dtype=param_dtype))
     self.clip_input_max = nnx.Param(jnp.array(float('inf'), dtype=param_dtype))
@@ -258,11 +307,13 @@ class RMSNorm(nnx.Module):
       dtype: jnp.dtype = jnp.float32,
       param_dtype: jnp.dtype = jnp.float32,
       with_scale: bool = True,
+      sharding: tuple[str | None, ...] | None = None,
   ):
     self.with_scale = with_scale
     if with_scale:
       self.scale = nnx.Param(
           jnp.zeros((dim,), dtype=param_dtype),
+          sharding=sharding,
       )
     self.dtype = dtype
 
@@ -284,9 +335,10 @@ class Standardize(nnx.Module):
       *,
       rngs: nnx.Rngs,
       param_dtype: jnp.dtype = jnp.float32,
+      sharding: tuple[str | None, ...] | None = None,
   ):
-    self.scale = nnx.Param(jnp.ones((dim,), dtype=param_dtype))
-    self.bias = nnx.Param(jnp.zeros((dim,), dtype=param_dtype))
+    self.scale = nnx.Param(jnp.ones((dim,), dtype=param_dtype), sharding=sharding)
+    self.bias = nnx.Param(jnp.zeros((dim,), dtype=param_dtype), sharding=sharding)
 
   def __call__(self, x: jax.Array) -> jax.Array:
     return (x - self.bias.value.astype(x.dtype)) * self.scale.value.astype(
@@ -310,6 +362,7 @@ class Attention(nnx.Module):
       use_qk_norm: bool = False,
       use_clipped_linears: bool = False,
       param_dtype: jnp.dtype = jnp.float32,
+      shd_config: VisionShardingConfig | None = None,
   ):
     self.num_heads = num_heads
     self.num_kv_heads = num_kv_heads
@@ -318,25 +371,39 @@ class Attention(nnx.Module):
     self.rope_base_frequency = rope_base_frequency
     self.rope_scale_factor = rope_scale_factor
     self.use_qk_norm = use_qk_norm
+    self.shd_config = shd_config
 
     linear_cls = ClippedEinsum if use_clipped_linears else Einsum
     self.attn_vec_einsum = linear_cls(
         shape=(num_heads, head_dim, features),
         rngs=rngs,
         param_dtype=param_dtype,
+        sharding=shd_config.attn_out_kernel if shd_config else None,
     )
     self.q_einsum = linear_cls(
         shape=(num_heads, features, head_dim),
         rngs=rngs,
         param_dtype=param_dtype,
+        sharding=shd_config.attn_q_kernel if shd_config else None,
     )
     self.kv_einsum = linear_cls(
         shape=(2, num_kv_heads, features, head_dim),
         rngs=rngs,
         param_dtype=param_dtype,
+        sharding=shd_config.attn_kv_kernel if shd_config else None,
     )
-    self.query_norm = RMSNorm(head_dim, rngs=rngs, param_dtype=param_dtype)
-    self.key_norm = RMSNorm(head_dim, rngs=rngs, param_dtype=param_dtype)
+    self.query_norm = RMSNorm(
+        head_dim,
+        rngs=rngs,
+        param_dtype=param_dtype,
+        sharding=shd_config.rms_norm_weight if shd_config else None,
+    )
+    self.key_norm = RMSNorm(
+        head_dim,
+        rngs=rngs,
+        param_dtype=param_dtype,
+        sharding=shd_config.rms_norm_weight if shd_config else None,
+    )
     self.value_norm = RMSNorm(
         head_dim, rngs=rngs, param_dtype=param_dtype, with_scale=False
     )
@@ -356,6 +423,11 @@ class Attention(nnx.Module):
 
     value_proj = self.value_norm(value_proj)
 
+    if self.shd_config:
+      query_proj = sharding_utils.shard(query_proj, self.shd_config.act_btnh)
+      key_proj = sharding_utils.shard(key_proj, self.shd_config.act_bskh)
+      value_proj = sharding_utils.shard(value_proj, self.shd_config.act_bskh)
+
     query_proj = apply_multidimensional_rope(
         query_proj,
         segment_pos,
@@ -373,7 +445,12 @@ class Attention(nnx.Module):
         query_proj, key_proj, value_proj, attn_mask
     )
 
+    if self.shd_config:
+      attn_vec = sharding_utils.shard(attn_vec, self.shd_config.act_btnh)
+
     attn_output = self.attn_vec_einsum('BTNH,NHD->BTD', attn_vec)
+    if self.shd_config:
+      attn_output = sharding_utils.shard(attn_output, self.shd_config.act_btd)
     return attn_output
 
   def _compute_attn_vec(
@@ -410,6 +487,9 @@ class Attention(nnx.Module):
       else:
         attn_logits += attn_mask[:, None, None, :, :]
 
+    if self.shd_config:
+      attn_logits = sharding_utils.shard(attn_logits, self.shd_config.act_bkgts)
+
     attn_weights = jax.nn.softmax(attn_logits, axis=-1).astype(v.dtype)
     result = jnp.einsum('bkgts,bskh->btkgh', attn_weights, v)
     return result.reshape(b, q_len, num_heads, h)
@@ -426,23 +506,32 @@ class FeedForward(nnx.Module):
       rngs: nnx.Rngs,
       use_clipped_linears: bool = False,
       param_dtype: jnp.dtype = jnp.float32,
+      shd_config: VisionShardingConfig | None = None,
   ):
     linear_cls = ClippedEinsum if use_clipped_linears else Einsum
     self.gating_einsum = linear_cls(
         shape=(2, hidden_dim, features),
         rngs=rngs,
         param_dtype=param_dtype,
+        sharding=shd_config.ffw_gate_kernel if shd_config else None,
     )
     self.linear = linear_cls(
         shape=(hidden_dim, features),
         rngs=rngs,
         param_dtype=param_dtype,
+        sharding=shd_config.ffw_out_kernel if shd_config else None,
     )
+    self.shd_config = shd_config
 
   def __call__(self, x: jax.Array) -> jax.Array:
     gate = self.gating_einsum('btd,cfd->btcf', x)
     activations = nnx.gelu(gate[..., 0, :]) * gate[..., 1, :]
-    return self.linear('btf,fd->btd', activations)
+    if self.shd_config:
+      activations = sharding_utils.shard(activations, self.shd_config.act_btf)
+    out = self.linear('btf,fd->btd', activations)
+    if self.shd_config:
+      out = sharding_utils.shard(out, self.shd_config.act_btd)
+    return out
 
 
 class VisionBlock(nnx.Module):
@@ -459,9 +548,13 @@ class VisionBlock(nnx.Module):
       rngs: nnx.Rngs,
       use_clipped_linears: bool = False,
       param_dtype: jnp.dtype = jnp.float32,
+      shd_config: VisionShardingConfig | None = None,
   ):
     self.pre_attention_norm = RMSNorm(
-        d_model, rngs=rngs, param_dtype=param_dtype
+        d_model,
+        rngs=rngs,
+        param_dtype=param_dtype,
+        sharding=shd_config.rms_norm_weight if shd_config else None,
     )
     self.attn = Attention(
         num_heads=num_heads,
@@ -474,19 +567,35 @@ class VisionBlock(nnx.Module):
         use_qk_norm=True,
         use_clipped_linears=use_clipped_linears,
         param_dtype=param_dtype,
+        shd_config=shd_config,
     )
     self.post_attention_norm = RMSNorm(
-        d_model, rngs=rngs, param_dtype=param_dtype
+        d_model,
+        rngs=rngs,
+        param_dtype=param_dtype,
+        sharding=shd_config.rms_norm_weight if shd_config else None,
     )
-    self.pre_ffw_norm = RMSNorm(d_model, rngs=rngs, param_dtype=param_dtype)
+    self.pre_ffw_norm = RMSNorm(
+        d_model,
+        rngs=rngs,
+        param_dtype=param_dtype,
+        sharding=shd_config.rms_norm_weight if shd_config else None,
+    )
     self.mlp = FeedForward(
         features=d_model,
         hidden_dim=ffw_hidden,
         rngs=rngs,
         use_clipped_linears=use_clipped_linears,
         param_dtype=param_dtype,
+        shd_config=shd_config,
     )
-    self.post_ffw_norm = RMSNorm(d_model, rngs=rngs, param_dtype=param_dtype)
+    self.post_ffw_norm = RMSNorm(
+        d_model,
+        rngs=rngs,
+        param_dtype=param_dtype,
+        sharding=shd_config.rms_norm_weight if shd_config else None,
+    )
+    self.shd_config = shd_config
 
   def __call__(
       self,
@@ -494,17 +603,29 @@ class VisionBlock(nnx.Module):
       positions: jax.Array,
       attn_mask: jax.Array | None,
   ) -> jax.Array:
+    if self.shd_config:
+      inputs = sharding_utils.shard(inputs, self.shd_config.act_btd)
     normed_inputs = self.pre_attention_norm(inputs)
+    if self.shd_config:
+      normed_inputs = sharding_utils.shard(
+          normed_inputs, self.shd_config.act_btd
+      )
     attn_output = self.attn(
         x=normed_inputs,
         segment_pos=positions,
         attn_mask=attn_mask,
     )
     attn_output = self.post_attention_norm(attn_output)
+    if self.shd_config:
+      attn_output = sharding_utils.shard(attn_output, self.shd_config.act_btd)
     attn_output += inputs
     outputs = self.pre_ffw_norm(attn_output)
+    if self.shd_config:
+      outputs = sharding_utils.shard(outputs, self.shd_config.act_btd)
     outputs = self.mlp(outputs)
     outputs = self.post_ffw_norm(outputs)
+    if self.shd_config:
+      outputs = sharding_utils.shard(outputs, self.shd_config.act_btd)
     outputs += attn_output
     return outputs
 
@@ -520,22 +641,26 @@ class VisionEntry(nnx.Module):
       *,
       rngs: nnx.Rngs,
       param_dtype: jnp.dtype = jnp.float32,
+      shd_config: VisionShardingConfig | None = None,
   ):
     self.patch_size = patch_size
     self.d_model = d_model
     self.pos_emb_shape_yx = pos_emb_shape_yx
+    self.shd_config = shd_config
 
     self.input_projection = Einsum(
         shape=(patch_size * patch_size * 3, d_model),
         rngs=rngs,
         param_dtype=param_dtype,
+        sharding=shd_config.emb_patch_kernel if shd_config else None,
     )
 
     pos_emb_init = nnx.initializers.normal(stddev=0.02)
     self.pos_emb = nnx.Param(
         pos_emb_init(
             rngs.params(), (pos_emb_shape_yx[0], pos_emb_shape_yx[1], d_model)
-        ).astype(param_dtype)
+        ).astype(param_dtype),
+        sharding=shd_config.emb_pos_kernel if shd_config else None,
     )
 
   def __call__(
@@ -545,10 +670,17 @@ class VisionEntry(nnx.Module):
   ) -> jax.Array:
     patches = 2.0 * (patches - 0.5)
     x = self.input_projection('btm,md->btd', patches)
+    if self.shd_config:
+      x = sharding_utils.shard(x, self.shd_config.act_btd)
     pos_embed = factorized_posemb(self.pos_emb.value, positions_xy).astype(
         x.dtype
     )
-    return x + pos_embed
+    if self.shd_config:
+      pos_embed = sharding_utils.shard(pos_embed, self.shd_config.act_btd)
+    out = x + pos_embed
+    if self.shd_config:
+      out = sharding_utils.shard(out, self.shd_config.act_btd)
+    return out
 
 
 class VisionExit(nnx.Module):
@@ -618,8 +750,10 @@ class VisionEncoder(nnx.Module):
       rngs: nnx.Rngs,
       config: VisionEncoderConfig,
       param_dtype: jnp.dtype = jnp.float32,
+      shd_config: VisionShardingConfig | None = None,
   ):
     self.config = config
+    self.shd_config = shd_config
 
     self.entry = VisionEntry(
         d_model=self.config.d_model,
@@ -627,6 +761,7 @@ class VisionEncoder(nnx.Module):
         pos_emb_shape_yx=self.config.pos_emb_shape_yx,
         rngs=rngs,
         param_dtype=param_dtype,
+        shd_config=shd_config,
     )
 
     key_size = self.config.d_model // self.config.num_heads
@@ -640,6 +775,7 @@ class VisionEncoder(nnx.Module):
             rngs=rngs,
             use_clipped_linears=self.config.use_clipped_linears,
             param_dtype=param_dtype,
+            shd_config=shd_config,
         )
         for _ in range(self.config.num_layers)
     ])
@@ -654,6 +790,7 @@ class VisionEncoder(nnx.Module):
           dim=self.config.d_model,
           rngs=rngs,
           param_dtype=param_dtype,
+          sharding=shd_config.rms_norm_weight if shd_config else None,
       )
 
   @property
@@ -700,5 +837,12 @@ class VisionEncoder(nnx.Module):
         emb_std = self.standardize(emb.astype(jnp.float32)).astype(dtype)
         standardized_outputs.append((emb_std, mask))
       outputs = tuple(standardized_outputs)
+
+    if self.shd_config:
+      sharded_outputs = []
+      for emb, mask in outputs:
+        emb = sharding_utils.shard(emb, self.shd_config.act_btd)
+        sharded_outputs.append((emb, mask))
+      outputs = tuple(sharded_outputs)
 
     return outputs
