@@ -36,3 +36,4 @@ pip install keyring keyrings.google-artifactregistry-auth
 
 VLLM_TARGET_DEVICE="tpu" uv pip install -r "${REQ_FILE}"
 uv pip install -r "${SPECIAL_REQ_FILE}" --force-reinstall
+uv pip install --no-deps "qwix>=0.1.6"
