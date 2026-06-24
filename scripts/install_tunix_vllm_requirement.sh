@@ -34,6 +34,6 @@ pip install aiohttp==3.12.15
 # Install Python packages that enable pip to authenticate with Google Artifact Registry automatically.
 pip install keyring keyrings.google-artifactregistry-auth
 
-VLLM_TARGET_DEVICE="tpu" uv pip install -r "${REQ_FILE}"
-uv pip install -r "${SPECIAL_REQ_FILE}" --force-reinstall
+VLLM_TARGET_DEVICE="tpu" uv pip install -r "${REQ_FILE}" --torch-backend=cpu
+uv pip install -r "${SPECIAL_REQ_FILE}" --force-reinstall --torch-backend=cpu
 uv pip install --no-deps "qwix>=0.1.6"
