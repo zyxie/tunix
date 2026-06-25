@@ -115,11 +115,13 @@ class ShardingConfig:
         vision_soft_emb_norm_weight=('tp',),
         exp_weight_edf=(fsdp, None, None, 'tp'),
         exp_weight_efd=(fsdp, 'tp', None),
-        per_layer_model_projection=(fsdp, None, 'tp'),
+        per_layer_model_projection=(fsdp, 'tp'),
         per_layer_input_gate=(fsdp, 'tp'),
         per_layer_projection=('tp', fsdp),
-        per_layer_input_embedding=('tp', None, fsdp),
-        vision_shd=vision.VisionShardingConfig.get_default_sharding(is_sampling),
+        per_layer_input_embedding=('tp', fsdp),
+        vision_shd=vision.VisionShardingConfig.get_default_sharding(
+            is_sampling
+        ),
     )
 
 
@@ -335,8 +337,11 @@ class Embedder(nnx.Module):
 
     if config.per_layer_input_dim > 0:
       self.per_layer_model_projection = Einsum(
-          einsum_str='BTD,DNP->BTNP',
-          shape=(self.embed_dim, config.num_layers, config.per_layer_input_dim),
+          einsum_str='BTD,DX->BTX',
+          shape=(
+              self.embed_dim,
+              config.num_layers * config.per_layer_input_dim,
+          ),
           sharding=config.shd_config.per_layer_model_projection,
           w_scale=(float(self.embed_dim) ** -0.5),
           rngs=rngs,
@@ -354,7 +359,7 @@ class Embedder(nnx.Module):
       self.per_layer_input_embedding = nnx.Param(
           nnx.initializers.normal(dtype=self.param_dtype)(
               rngs.params(),
-              (self.vocab_size, config.num_layers, config.per_layer_input_dim),
+              (self.vocab_size, config.num_layers * config.per_layer_input_dim),
           ),
           sharding=config.shd_config.per_layer_input_embedding,
       )
@@ -396,8 +401,24 @@ class Embedder(nnx.Module):
         jnp.logical_and(t >= 0, t < self.vocab_size), t, jnp.zeros_like(t)
     )
     x = self.per_layer_model_projection(x)
+    x = jnp.reshape(
+        x,
+        (
+            *x.shape[:-1],
+            self.config.num_layers,
+            self.config.per_layer_input_dim,
+        ),
+    )
     x = self.per_layer_projection_norm(x)
     y = self.per_layer_input_embedding.value[t]
+    y = jnp.reshape(
+        y,
+        (
+            *y.shape[:-1],
+            self.config.num_layers,
+            self.config.per_layer_input_dim,
+        ),
+    )
     y *= jnp.sqrt(self.config.per_layer_input_dim).astype(y.dtype)
     return (x + y) * jax.lax.rsqrt(2.0).astype(x.dtype)
 
@@ -436,7 +457,7 @@ def _add_bidirectional_mask(
 
   attn_shape = jnp.shape(attn_mask)
   kv_shape = jnp.shape(kv_block_indices)
-  
+
   attn_kv_len = attn_shape[-1]
   if attn_kv_len != kv_shape[-1]:
     if attn_kv_len > kv_shape[-1]:
@@ -449,7 +470,7 @@ def _add_bidirectional_mask(
       (kv_block_indices[:, None, :] == q_block_indices[..., None])
       & (q_block_indices[..., None] > 0)
   )
-  
+
   if len(attn_shape) == 4:
     bidir_cond = jnp.expand_dims(bidir_cond, axis=1)
 

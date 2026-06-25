@@ -618,20 +618,6 @@ def _align_shape(
         val = jnp.reshape(val, (kwargs['num_kv_heads'], kwargs['head_dim']))
         new_tgt_shape = tgt_shape
 
-    elif (
-        re.compile(r'.*(per_layer_input_embedding|per_layer_model_projection\.w)').match(src_key)
-        and len(val.shape) == 3
-        and len(tgt_shape) == 2
-        and math.prod(tgt_shape) == math.prod(val.shape)
-    ):
-      logging.debug(
-          'Reshaping 3D tensor on %s: %s -> %s',
-          src_key,
-          val.shape,
-          tgt_shape,
-      )
-      return jnp.reshape(val, tgt_shape)
-
     elif re.compile(r'layers\..*\.attn\.(q|k|v|o)_proj').match(src_key):
       if math.prod(tgt_shape) == math.prod(val.shape):
         logging.debug(

@@ -116,11 +116,11 @@ TO_HF_MAPPINGS = {
     ),
     'embedder.per_layer_input_embedding': (
         'model.embed_tokens_per_layer.weight',
-        ('model', None, None),
+        ('model', None),
     ),
     'embedder.per_layer_model_projection.w': (
         'model.per_layer_model_projection.weight',
-        (None, None, 'model'),
+        (None, 'model'),
     ),
     'embedder.per_layer_projection_norm.scale': (
         'model.per_layer_projection_norm.weight',

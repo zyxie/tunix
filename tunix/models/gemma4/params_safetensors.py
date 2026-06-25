@@ -49,11 +49,11 @@ def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
       ),
       r"(?:model\.language_model\.)?embed_tokens_per_layer\.weight": (
           "embedder.per_layer_input_embedding.value",
-          (None, (cfg.num_embed, cfg.num_layers, cfg.per_layer_input_dim)),
+          (None, (cfg.num_embed, cfg.num_layers * cfg.per_layer_input_dim)),
       ),
       r"(?:model\.language_model\.)?per_layer_model_projection\.weight": (
           "embedder.per_layer_model_projection.w",
-          ((1, 0), (cfg.embed_dim, cfg.num_layers, cfg.per_layer_input_dim)),
+          ((1, 0), (cfg.embed_dim, cfg.num_layers * cfg.per_layer_input_dim)),
       ),
       r"(?:model\.language_model\.)?per_layer_projection_norm\.weight": (
           "embedder.per_layer_projection_norm.scale",
