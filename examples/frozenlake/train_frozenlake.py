@@ -49,7 +49,6 @@ import optax
 from orbax import checkpoint as ocp
 import qwix
 
-jax.config.update("jax_debug_nans", True)
 # ====== Logging Configuration ======
 absl_logging.use_python_logging()
 logging.basicConfig(
@@ -147,7 +146,7 @@ arg_parser.add_argument("--top_k", type=int, default=0)
 # num_generations` trajectories can be in flight at once. A high cap also lets
 # every multi-turn agent step its env without waiting for a previous wave to
 # drain. Drop only if KV cache saturates or generation throughput regresses.
-arg_parser.add_argument("--max_concurrency", type=int, default=512)
+arg_parser.add_argument("--max_concurrency", type=int, default=16)
 arg_parser.add_argument("--shuffle_data", type=bool, default=True)
 arg_parser.add_argument("--seed", type=int, default=42)
 arg_parser.add_argument(
@@ -192,7 +191,7 @@ NUM_GENERATIONS = args.num_generations
 # some headroom without provisioning a huge unused KV-cache pool — on a
 # shared trainer+rollout mesh that KV-cache pool consumes HBM that the
 # trainer needs at peak (logits + activations + optimizer state).
-VLLM_MAX_NUM_SEQS = 64
+VLLM_MAX_NUM_SEQS = 16
 VLLM_MAX_BATCHED_TOKENS = VLLM_MAX_NUM_SEQS * 2 * 1024 // 8
 
 NUM_ITERATIONS = 1
