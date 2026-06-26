@@ -18,8 +18,8 @@ pip install gymnasium
 
 set -x # Enable xtrace
 
-batch_size=${batch_size:-2}
-num_batches=${num_batches:-3}
+batch_size=${batch_size:-64}
+num_batches=${num_batches:-5}
 
 echo "Using parameters:"
 echo "  Batch Size: $batch_size"

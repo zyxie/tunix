@@ -85,7 +85,7 @@ rl_training_config:
     weight_decay: 0.0
     max_grad_norm: 100.0
   eval_every_n_steps: 10
-  max_steps: 9
+  max_steps: 5
   metrics_logging_options:
     log_dir: "/tmp/logging"
     flush_every_n_steps: 1
