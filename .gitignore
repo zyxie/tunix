@@ -25,4 +25,3 @@
 /docs/sg_execution_times.rst
 /docs/generated
 build/*
-wandb/
