@@ -35,10 +35,8 @@ reference_model_config:
   mesh: null
   same_mesh_as: "actor"
 rollout_model_config:
+  mesh: null
   same_mesh_as: "actor"
-  mesh:
-    shape: "(1,8)"
-    axis_names: "('fsdp','tp')"
 tokenizer_config:
   tokenizer_type: "huggingface"
   tokenizer_path: "google/gemma-4-E2B-it"
@@ -65,14 +63,14 @@ chat_parser_config:
   type: "gemma4"
   enable_thinking: False
 
-batch_size: 2
-num_batches: 3
+batch_size: 64
+num_batches: 5
 num_test_batches: 2
-num_train_epochs: 3
+num_train_epochs: 1
 
 rl_training_config:
-  mini_batch_size: 2
-  train_micro_batch_size: 1
+  mini_batch_size: 64
+  train_micro_batch_size: 2
   actor_optimizer_config:
     opt_type: "adamw"
     peak_value: 1e-6
@@ -116,8 +114,10 @@ vllm_config:
   tpu_backend_type: "jax"
   server_mode: True
   async_scheduling: False
-  max_num_seqs: 16
-  max_num_batched_tokens: 4096
+  max_num_seqs: 64
+  max_num_batched_tokens: 16384
+  data_parallel_size: 1
+  tensor_parallel_size: 8
   kwargs:
     kv_cache_metrics: True
     disable_log_stats: False
