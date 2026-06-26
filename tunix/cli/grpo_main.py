@@ -524,10 +524,13 @@ class GrpoPipeline(config.HyperParameters):
       )
     else:
       graph_def, params = nnx.split(reference_model)
-      actor_model = nnx.merge(
-          graph_def,
-          jax.tree.map(jnp.copy, params),
-      )
+      actor_dtype_str = actor_model_config.get("load_dtype")
+      if actor_dtype_str:
+        actor_dtype = getattr(jnp, actor_dtype_str)
+        params = jax.tree.map(lambda x: x.astype(actor_dtype), params)
+      else:
+        params = jax.tree.map(jnp.copy, params)
+      actor_model = nnx.merge(graph_def, params)
 
     cluster_config = self.create_cluster_config(
         role_to_mesh=role_to_mesh,
