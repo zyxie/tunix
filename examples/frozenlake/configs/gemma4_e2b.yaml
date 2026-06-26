@@ -20,8 +20,14 @@ model_config:
   mesh:
     shape: "(8,1)"
     axis_names: "('fsdp','tp')"
+  remat_config: "DECODER"
+  use_flash_attention: True
+  flash_attention_block_size: 256
+  use_sliding_window_kv_cache: False
+  dtype: "bfloat16"
   rng_seed: 42
 actor_model_config:
+  load_dtype: "float32"
   mesh:
     shape: "(8,1)"
     axis_names: "('fsdp','tp')"
@@ -29,6 +35,7 @@ reference_model_config:
   mesh: null
   same_mesh_as: "actor"
 rollout_model_config:
+  same_mesh_as: "actor"
   mesh:
     shape: "(1,8)"
     axis_names: "('fsdp','tp')"
@@ -58,13 +65,13 @@ chat_parser_config:
   type: "gemma4"
   enable_thinking: False
 
-batch_size: 64
+batch_size: 2
 num_batches: 3
-num_test_batches: 0
-num_train_epochs: 1
+num_test_batches: 2
+num_train_epochs: 3
 
 rl_training_config:
-  mini_batch_size: 64
+  mini_batch_size: 2
   train_micro_batch_size: 1
   actor_optimizer_config:
     opt_type: "adamw"
@@ -73,20 +80,22 @@ rl_training_config:
     init_value: 0.0
     end_value: 0.0
     warmup_ratio: 0.1
-    warmup_steps: 15
-    decay_steps: 150
+    warmup_steps: 0
+    decay_steps: 9
     b1: 0.9
     b2: 0.95
     weight_decay: 0.0
-    max_grad_norm: 0.1
+    max_grad_norm: 100.0
   eval_every_n_steps: 10
-  max_steps: 150
+  max_steps: 9
   metrics_logging_options:
+    log_dir: "/tmp/logging"
     flush_every_n_steps: 1
   checkpointing_options:
     save_interval_steps: 50
     max_to_keep: 4
   profiler_options: {}
+  compute_logps_chunk_size: 2048
 
 rollout_config:
   total_generation_steps: 2048
@@ -94,9 +103,38 @@ rollout_config:
   temperature: 0.7
   top_p: 1.0
   top_k: 0
+  return_logprobs: True
+  rollout_vllm_init_with_random_weights: True
+  rollout_vllm_sampling_kwargs:
+    skip_special_tokens: False
   
-rollout_engine: "vanilla"
+rollout_engine: "vllm"
+
+vllm_config:
+  model_version: "google/gemma-4-E2B-it"
+  hbm_utilization: 0.2
+  tpu_backend_type: "jax"
+  server_mode: True
+  async_scheduling: False
+  max_num_seqs: 16
+  max_num_batched_tokens: 4096
+  kwargs:
+    kv_cache_metrics: True
+    disable_log_stats: False
+    enable_prefix_caching: False
+    dtype: "bfloat16"
+    limit_mm_per_prompt:
+      image: 0
+      video: 0
+      audio: 0
+    hf_overrides:
+      final_logit_softcapping: 30.0
+      text_config:
+        final_logit_softcapping: 30.0
+
 offload_to_cpu: False
+
+reward_functions: []
 
 agentic_grpo_config:
   num_generations: 8

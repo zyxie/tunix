@@ -18,7 +18,7 @@ pip install gymnasium
 
 set -x # Enable xtrace
 
-batch_size=${batch_size:-64}
+batch_size=${batch_size:-2}
 num_batches=${num_batches:-3}
 
 echo "Using parameters:"
@@ -30,5 +30,4 @@ python3 -m tunix.cli.grpo_main \
   override_config_file=examples/frozenlake/configs/gemma4_e2b.yaml \
   batch_size=$batch_size \
   num_batches=$num_batches \
-  rl_training_config.max_steps=$num_batches \
   "$@"

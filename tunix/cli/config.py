@@ -279,6 +279,8 @@ class HyperParameters:
           f"Expected config section {key!r} to be a mapping, got"
           f" {type(value).__name__}."
       )
+    if isinstance(value, omegaconf.DictConfig):
+      return omegaconf.OmegaConf.to_container(value, resolve=True)
     return dict(value)
 
   def _mutable_config_mapping(self, key: str) -> MutableMapping[str, Any]:

@@ -178,15 +178,6 @@ class GrpoPipeline(config.HyperParameters):
       if role not in base_owners:
         continue
       has_mesh = bool(self.config.get(model_key, {}).get("mesh"))
-      if role in same_mesh_as:
-        if has_mesh:
-          raise ValueError(
-              f"{model_key}.mesh is specified, so it must own a separate mesh "
-              "and cannot also use same_mesh_as."
-          )
-      else:
-        role_to_owner[role] = resolve_owner(role, set())
-        continue
       role_to_owner[role] = resolve_owner(role, set())
     return role_to_owner
 
@@ -249,7 +240,21 @@ class GrpoPipeline(config.HyperParameters):
       owner_to_mesh[owner] = mesh_lib.create_mesh(
           axis_shapes, axis_names, devices=assigned_devices
       )
-    return {role: owner_to_mesh[owner] for role, owner in role_to_owner.items()}
+      
+    role_to_mesh = {}
+    for role, owner in role_to_owner.items():
+      model_key = self._ROLE_TO_MODEL_KEY[role]
+      has_mesh = bool(self.config.get(model_key, {}).get("mesh"))
+      if has_mesh:
+        axis_shapes, axis_names = self.parse_mesh_config(model_key)
+        owner_model_key = self._ROLE_TO_MODEL_KEY[owner]
+        assigned_devices = allocated_devices[owner_model_key]
+        role_to_mesh[role] = mesh_lib.create_mesh(
+            axis_shapes, axis_names, devices=assigned_devices
+        )
+      else:
+        role_to_mesh[role] = owner_to_mesh[owner]
+    return role_to_mesh
 
   # ------------------------------------------------------------------
   # Rollout config
