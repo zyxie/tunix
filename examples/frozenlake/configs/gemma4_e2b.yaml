@@ -46,11 +46,13 @@ env_class_path: "examples.frozenlake.env.FrozenLakeEnv"
 env_kwargs:
   max_steps: 8
 
+
+data_module: "examples.frozenlake.data"
 data_config:
   split: "train"
   shuffle: True
   seed: 42
-  data_dir: "gs://tunix/data/Frozenlake"
+  data_dir: "/tmp/data/frozenlake"
 
 chat_parser_config:
   type: "gemma4"
