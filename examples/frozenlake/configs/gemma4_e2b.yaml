@@ -34,19 +34,18 @@ rollout_model_config:
     axis_names: "('fsdp','tp')"
 tokenizer_config:
   tokenizer_type: "huggingface"
-  tokenizer_path: ""
+  tokenizer_path: "google/gemma-4-E2B-it"
   add_bos: True
 
 # Agentic GRPO configuration
 training_mode: "agentic_grpo"
-agent_class_path: "tunix.oss.examples.frozenlake.agent.FrozenLakeAgent"
+agent_class_path: "examples.frozenlake.agent.FrozenLakeAgent"
 agent_kwargs:
   use_multistep_prompt: True
-env_class_path: "tunix.oss.examples.frozenlake.env.FrozenLakeEnv"
+env_class_path: "examples.frozenlake.env.FrozenLakeEnv"
 env_kwargs:
   max_steps: 8
 
-data_module: "tunix.oss.examples.frozenlake.data"
 data_config:
   split: "train"
   shuffle: True

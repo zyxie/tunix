@@ -476,7 +476,14 @@ class HyperParameters:
     supported_sources["gemma2"] = ["kaggle", "internal", "maxtext"]
     supported_sources["gemma3"] = ["gcs", "internal", "maxtext"]
 
-    if model_name.startswith("gemma3") or model_name.startswith("gemma-3"):
+    if model_name.startswith("gemma4") or model_name.startswith("gemma-4"):
+      expected_sources = supported_sources["gemma4"]
+      if model_source not in expected_sources:
+        raise ValueError(
+            f"Model '{model_name}' must use source(s) {expected_sources}, but"
+            f" got '{model_source}'."
+        )
+    elif model_name.startswith("gemma3") or model_name.startswith("gemma-3"):
       expected_sources = supported_sources["gemma3"]
       if model_source not in expected_sources:
         raise ValueError(
