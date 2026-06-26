@@ -27,7 +27,7 @@ echo "  Num Batches: $num_batches"
 
 python3 -m tunix.cli.grpo_main \
   tunix/cli/base_config.yaml \
-  override_config_file=tunix/oss/examples/frozenlake/configs/gemma4_e2b.yaml \
+  override_config_file=examples/frozenlake/configs/gemma4_e2b.yaml \
   batch_size=$batch_size \
   num_batches=$num_batches \
   rl_training_config.max_steps=$num_batches \
