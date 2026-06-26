@@ -49,6 +49,7 @@ import optax
 from orbax import checkpoint as ocp
 import qwix
 
+jax.config.update("jax_debug_nans", True)
 # ====== Logging Configuration ======
 absl_logging.use_python_logging()
 logging.basicConfig(
@@ -106,8 +107,8 @@ arg_parser = argparse.ArgumentParser(
 # Tuned together with `num_generations=8` to keep per-step rollout latency
 # manageable on a single host while preserving enough samples per prompt for
 # the GRPO group-mean baseline.
-arg_parser.add_argument("--batch_size", type=int, default=64)
-arg_parser.add_argument("--mini_batch_size", type=int, default=64)
+arg_parser.add_argument("--batch_size", type=int, default=2)
+arg_parser.add_argument("--mini_batch_size", type=int, default=2)
 arg_parser.add_argument("--learning_rate", type=float, default=1e-6)
 arg_parser.add_argument("--b1", type=float, default=0.9)
 # AdamW second-moment decay (β2). Lower than the AdamW default (0.999) so the
