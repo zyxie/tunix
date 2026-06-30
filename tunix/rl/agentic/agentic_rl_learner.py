@@ -228,6 +228,7 @@ class AgenticRLLearner(abc.ABC, Generic[TConfig]):
     self.tokenizer = rl_cluster.tokenizer
     self.policy_version = self.rl_cluster.global_steps
     self._rollout_sync_lock = agentic_utils.RolloutSyncLock()
+    self._background_tasks: Set[asyncio.Task] = set()
     self._full_batch_size = 0
     self._process_in_consumer: bool = False
 
@@ -575,7 +576,8 @@ class AgenticRLLearner(abc.ABC, Generic[TConfig]):
             await producer_task
 
         cancellation_task = asyncio.create_task(await_cancellation())
-        del cancellation_task
+        self._background_tasks.add(cancellation_task)
+        cancellation_task.add_done_callback(self._background_tasks.discard)
 
   def _batch_to_train_example(
       self,
