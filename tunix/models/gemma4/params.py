@@ -50,6 +50,7 @@ def create_model_from_checkpoint(
     model_config: model_lib.ModelConfig,
     mesh: jax.sharding.Mesh | None = None,
     dtype: jnp.dtype = jnp.bfloat16,
+    text_only: bool = True,
 ) -> model_lib.Gemma4:
   """Load a Gemma4 model from an Orbax checkpoint.
 
@@ -58,12 +59,15 @@ def create_model_from_checkpoint(
     model_config: Gemma4 model configuration.
     mesh: Optional JAX sharding mesh for distributed loading.
     dtype: Parameter dtype (default: bfloat16).
+    text_only: If True, will not load image/audio encoders (default: True).
 
   Returns:
     A Gemma4 model instance with loaded weights.
   """
   abs_model = nnx.eval_shape(
-      lambda: model_lib.Gemma4(model_config, rngs=nnx.Rngs(0))
+      lambda: model_lib.Gemma4(
+          model_config, rngs=nnx.Rngs(0), text_only=text_only
+      )
   )
   raw_params = ocp.StandardCheckpointer().restore(checkpoint_path)
   mapped_params = map_from_upstream_checkpoint(raw_params)
@@ -253,16 +257,23 @@ def map_from_upstream_checkpoint(params: Mapping[str, Any]) -> dict[str, Any]:
       if 'stacked_layers' in module_path:
         num_layers = value.shape[0]
         block_idx = module_path.index('stacked_layers')
-        sub_components = parts[block_idx + 2 : -1] # skips 'stacked_layers' and 'block'
+        sub_components = parts[
+            block_idx + 2 : -1
+        ]  # skips 'stacked_layers' and 'block'
 
         # Norms normalization
-        if sub_components and sub_components[-1] in ('query_norm', '_query_norm'):
-          sub_components = sub_components[:-1] + ['_query_norm']
+        if sub_components and sub_components[-1] in (
+            'query_norm',
+            '_query_norm',
+        ):
+          sub_components = sub_components[:-1] + ['query_norm']
         elif sub_components and sub_components[-1] in ('key_norm', '_key_norm'):
-          sub_components = sub_components[:-1] + ['_key_norm']
+          sub_components = sub_components[:-1] + ['key_norm']
 
         for i in range(num_layers):
-          new_params[('vision_encoder', 'layers', i, *sub_components, param_name)] = value[i]
+          new_params[
+              ('vision_encoder', 'layers', i, *sub_components, param_name)
+          ] = value[i]
         continue
 
       # Standardize:
@@ -279,10 +290,18 @@ def map_from_upstream_checkpoint(params: Mapping[str, Any]) -> dict[str, Any]:
     # --- Embedder ---
     if module_path and module_path[0] == 'embedder':
       if len(module_path) > 1 and module_path[1] == 'per_layer_embeddings':
-        # Rename upstream 'per_layer_embeddings' → Tunix field name.
+        # Rename and reshape upstream 'per_layer_embeddings' → Tunix field name.
+        value = value.reshape(value.shape[0], -1)
         new_params[('embedder', 'per_layer_input_embedding')] = value
       elif param_name in ('per_layer_embeddings', 'per_layer_input_embedding'):
+        value = value.reshape(value.shape[0], -1)
         new_params[('embedder', 'per_layer_input_embedding')] = value
+      elif (
+          module_path == ['embedder', 'per_layer_model_projection']
+          and param_name == 'w'
+      ):
+        value = value.reshape(value.shape[0], -1)
+        new_params[tuple(module_path + [param_name])] = value
       elif len(module_path) > 1:
         # Sub-modules of the embedder (e.g., mm_input_projection).
         new_params[tuple(module_path + [param_name])] = value
