@@ -22,6 +22,7 @@ Tunix NNX implementation.
 
 from collections.abc import Mapping
 import itertools
+import re
 from typing import Any
 
 from absl import logging
@@ -281,6 +282,24 @@ def map_from_upstream_checkpoint(params: Mapping[str, Any]) -> dict[str, Any]:
         new_params[('vision_encoder', 'standardize', param_name)] = value
         continue
 
+    if parts and parts[0] == 'audio_encoder':
+      if parts[1] == 'conformer':
+        match = re.search(r'stacked_layers_(\d+)', parts[2])
+        if not match:
+          raise ValueError(
+              'audio_encoder/conformer should only have children with keys'
+              f' stacked_layers_<layer-index>. Got {"/".join(parts)}'
+          )
+        layer_idx = int(match.group(1))
+        new_params[
+            ('audio_encoder', 'conformer_layers', layer_idx, *parts[3:])
+        ] = value
+        continue
+      else:
+        # everything else maps exactly
+        new_params[tuple(parts)] = value
+        continue
+
     if not parts:
       logging.warning('Skipping empty key path: %r', key_path)
       continue
@@ -320,10 +339,8 @@ def map_from_upstream_checkpoint(params: Mapping[str, Any]) -> dict[str, Any]:
       logging.warning('Unexpected bare param after transformer: %r', key_path)
       continue
 
-    # Skip multimodal modules (e.g., audio_encoder).
     if not module_path[0].startswith('layer_'):
-      logging.info('Skipping non-layer module: %s', '/'.join(parts))
-      continue
+      raise ValueError(f'Unexpected non-layer module: {"/".join(parts)}')
 
     layer_idx = ('layers', int(module_path[0].removeprefix('layer_')))
 

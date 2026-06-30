@@ -36,6 +36,7 @@ from tunix.generate import base_sampler
 from tunix.generate import utils
 import tunix.generate.beam_search as beam_search_lib
 import tunix.generate.tokenizer_adapter as tok_adapter
+from tunix.processors import audio_processor
 from tunix.processors import image_processor
 
 LayerCache = dict[str, jaxtyping.Array]
@@ -562,6 +563,7 @@ class Sampler(base_sampler.BaseSampler):
       params: statelib.State,
       sampler_state: _SamplingState,
       images: jnp.ndarray | None = None,
+      audios: Any = None,
       echo: bool = True,
   ) -> _SamplingState:
     """Performs prefill."""
@@ -600,7 +602,11 @@ class Sampler(base_sampler.BaseSampler):
       )
 
     transformer = nnx.merge(self._transformer_graphdef, params)
-    kwargs = {} if images is None else {'images': images}
+    kwargs = {}
+    if images is not None:
+      kwargs['images'] = images
+    if audios is not None:
+      kwargs['audios'] = audios
     decode_only_last_token = self._supports_decode_only_last_token and not echo
     if decode_only_last_token:
       kwargs['decode_only_last_token'] = True
@@ -759,6 +765,11 @@ class Sampler(base_sampler.BaseSampler):
           | jnp.ndarray
           | None
       ) = None,
+      audios: (
+          np.ndarray | list[np.ndarray | list[np.ndarray] | None] | None
+      ) = None,
+      max_audio_length: int | None = None,
+      max_audio_clips: int | None = None,
   ) -> base_sampler.SamplerOutput:
     """Samples a completion of the input string.
 
@@ -790,6 +801,18 @@ class Sampler(base_sampler.BaseSampler):
       images: input images to process. Can be a string/array, list of
         strings/arrays, or list of list of strings/arrays depending on whether
         there is one, multiple, or varying number of images per batch.
+      audios: Raw audio waveforms. Can be a single array (batch_size=1), list of
+        arrays (multiple samples in a batch, each sample with one clip), or a
+        list of list of arrays (multiple clips for multiple samples in a batch).
+        A mix of these is also allowed. E.g. `[a1, [a2, a3], []]` would mean the
+        first sample has 1 audio clip (a1), the second sample has 2 audio clips
+        (a2 and a3), and the third sample has 0 audio clips.
+      max_audio_length: Maximum length of audio waveforms. If specified, audio
+        input to the model will be padded upto this length. Specify to avoid
+        recompilation on different audio lengths across calls.
+      max_audio_clips: Maximum number of audio clips in a sample. If specified,
+        audio input to the model will be padded upto this count. Specify to
+        avoid recompilation on different number of clips across calls.
 
     Returns:
       sampler_output: A SamplerOutput object containing the generated samples.
@@ -803,13 +826,12 @@ class Sampler(base_sampler.BaseSampler):
 
     tokens = [self.tokenize(x) for x in input_strings]
 
-    processed_images = images
-    is_gemma4_multimodal = (
-        hasattr(self.transformer, 'vision_encoder')
-        and self.transformer.vision_encoder is not None
-    )
+    is_gemma4 = self.transformer.__class__.__name__ == 'Gemma4'
 
-    if is_gemma4_multimodal and images is not None:
+    processed_images = None
+    if is_gemma4 and images is not None:
+      assert hasattr(self.transformer, 'vision_encoder')
+      assert self.transformer.vision_encoder is not None
       processed_images, tokens = image_processor.process_gemma4_inputs(
           images,
           tokens,
@@ -820,6 +842,21 @@ class Sampler(base_sampler.BaseSampler):
     elif images is not None and self.image_processor is not None:
       processed_images = self.image_processor(images)
       processed_images = jnp.array(processed_images)
+
+    processed_audios = None
+    if audios is not None:
+      if is_gemma4:
+        assert hasattr(self.transformer, 'audio_encoder')
+        assert self.transformer.audio_encoder is not None
+        processed_audios, tokens = audio_processor.process_gemma4_inputs(
+            audios=audios,
+            tokens=tokens,
+            audio_encoder=self.transformer.audio_encoder,
+            max_audio_length=max_audio_length,
+            max_audio_clips=max_audio_clips,
+        )
+      else:
+        raise NotImplementedError('Audio support only implemented for Gemma4.')
 
     max_tokens_length = max(len(x) for x in tokens)
     if max_prompt_length is None or max_prompt_length < max_tokens_length:
@@ -861,7 +898,8 @@ class Sampler(base_sampler.BaseSampler):
     sampling_state = self._compiled_prefill_fn(
         self._flattened_transformer_state,
         sampling_state,
-        processed_images,
+        images=processed_images,
+        audios=processed_audios,
         echo=echo,
     )
 

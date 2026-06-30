@@ -336,19 +336,6 @@ class MapFromUpstreamCheckpointTest(parameterized.TestCase):
             err_msg=f'Value mismatch for {key} between formats',
         )
 
-  def test_non_layer_modules_skipped(self):
-
-    upstream = _make_upstream_semiflat()
-    upstream['transformer/audio_encoder'] = {
-        'weight': np.array([1.0, 2.0, 3.0], dtype=np.float32),
-    }
-
-    mapped = params.map_from_upstream_checkpoint(upstream)
-    flat = flatten_dict(mapped)
-
-    audio_keys = [k for k in flat if 'audio_encoder' in str(k)]
-    self.assertEmpty(audio_keys)
-
   @parameterized.named_parameters(
       dict(
           testcase_name='query_norm_no_underscore',

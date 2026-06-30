@@ -734,10 +734,16 @@ class SamplerTest(parameterized.TestCase):
             '</s>': 2,
             'Describe:': 3,
             '<img>': 258880,
-            '<soi>': 258881,
+            '<soi>': 255999,
             '<eoi>': 258882,
+            '<audio>': 258881,
+            '<soa>': 256000,
+            '<eoa>': 258883,
         }
     )
+    # Since there are a lot of holes (missing ids) in our vocab.
+    vocab.DecodeIds = mock.MagicMock()
+    vocab.DecodeIds.return_value = 'decoded_string'
 
     config = gemma4_model_lib.ModelConfig.gemma4_e2b()
     config = dataclasses.replace(
@@ -758,6 +764,12 @@ class SamplerTest(parameterized.TestCase):
         patch_size=4,
         output_length=5,
     )
+    config.audio_encoder = gemma4_model_lib.audio.ConformerConfig(
+        num_layers=1,
+        model_dims=16,
+        atten_num_heads=2,
+        lm_model_dims=32,
+    )
 
     rngs = nnx.Rngs(42)
     transformer = gemma4_model_lib.Gemma4(config, rngs=rngs, text_only=False)
@@ -766,7 +778,7 @@ class SamplerTest(parameterized.TestCase):
         transformer=transformer,
         tokenizer=vocab,
         cache_config=sampler_lib.CacheConfig(
-            cache_size=64,
+            cache_size=128,
             num_layers=1,
             num_kv_heads=1,
             head_dim=16,
@@ -774,12 +786,14 @@ class SamplerTest(parameterized.TestCase):
     )
 
     # Let prompt contain image placeholder tag
-    prompt = "Describe: <img>"
+    prompt = "Describe: <img> <audio>"
     dummy_image = np.ones((16, 16, 3), dtype=np.uint8)
+    dummy_audio = np.zeros(16000, dtype=np.float32)
 
     result = sampler(
         [prompt],
         images=[dummy_image],
+        audios=[dummy_audio],
         max_prompt_length=32,
         max_generation_steps=5,
     )
