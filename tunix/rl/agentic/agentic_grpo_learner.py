@@ -83,7 +83,7 @@ class GRPOConfig(agentic_rl_learner.AgenticRLConfig):
     off_policy_steps: Number of off-policy steps can be accepted before a policy
       update.
     degenerate_group_masking: Whether to mask out degenerate groups with all-0
-      advantages.
+      advantages. Deprecated. Will remove in the next release.
   """
 
   algo_variant: str = "agentic_grpo"
@@ -106,6 +106,7 @@ class GRPOConfig(agentic_rl_learner.AgenticRLConfig):
   max_concurrency: int = 16
   epsilon_high: float | None = None  # 0.28 from DAPO.
   off_policy_steps: int = 0
+  # Deprecated. Will remove in the next release.
   degenerate_group_masking: bool = (
       False  # Whether to mask out degenerate groups with all-0 advantages.
   )
@@ -555,13 +556,6 @@ class GRPOLearner(agentic_rl_learner.AgenticRLLearner[TGrpoConfig]):
       )
 
     logging.debug("Advantages computed: %s", advantages)
-
-    if self.algo_config.degenerate_group_masking:
-      if jnp.all(jnp.isclose(advantages, 0.0)):
-        logging.info(
-            "Filtering degenerate group %s with all-0 advantages.", group_id
-        )
-        completion_mask = jnp.zeros_like(completion_mask)
 
     policy_versions = np.array(policy_versions_list, dtype=np.int32)
 
