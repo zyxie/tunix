@@ -198,16 +198,6 @@ parser.add_argument(
     ),
 )
 
-parser.add_argument(
-    "--degenerate_group_masking",
-    type=bool,
-    default=False,
-    help=(
-        "Whether to mask out groups whose advantages are all zero. "
-        "Default is False to align with rLLM DeepSWE."
-    ),
-)
-
 
 # Other
 parser.add_argument("--do_mem_profiling", type=bool, default=False)
@@ -481,7 +471,6 @@ FILTER_STATUSES = (
 LOSS_AGG_MODE = args.loss_agg_mode
 ADVANTAGE_ESTIMATOR = args.advantage_estimator
 USE_ROLLOUT_LOGPS = args.use_rollout_logps
-DEGENERATE_GROUP_MASKING = args.degenerate_group_masking
 
 
 # %%
@@ -806,7 +795,6 @@ config_kwargs = {
     "loss_agg_mode": LOSS_AGG_MODE,
     "advantage_estimator": ADVANTAGE_ESTIMATOR,
     "use_rollout_logps": USE_ROLLOUT_LOGPS,
-    "degenerate_group_masking": DEGENERATE_GROUP_MASKING,
 }
 
 grpo_config = agentic_grpo_learner.GRPOConfig(**config_kwargs)
@@ -889,7 +877,6 @@ try:
       "filter_statuses": (
           [s.name for s in FILTER_STATUSES] if FILTER_STATUSES else None
       ),
-      "degenerate_group_masking": DEGENERATE_GROUP_MASKING,
       # Mesh topology
       "num_devices": len(devices),
       "rollout_mesh_fsdp": rollout_fsdp,
