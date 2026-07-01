@@ -667,9 +667,8 @@ class AgenticRLLearner(abc.ABC, Generic[TConfig]):
                 batch_results=batch,
                 mode=rl_cluster_lib.Mode.TRAIN,
             )
-            for _ in range(self._num_iterations()):
-              for train_example in train_examples:
-                train_data_queue.put(train_example)
+            for train_example in train_examples:
+              train_data_queue.put(train_example)
         except Exception as e:
           if not isinstance(e, RuntimeError):
             logging.exception(
@@ -814,6 +813,7 @@ class AgenticRLLearner(abc.ABC, Generic[TConfig]):
     micro_batches_since_last_sync = 0
     micro_batches_per_full_batch = full_batch_size // train_micro_batch_size
     did_eval_this_global_step = False
+    full_batch_chunks = []
     for train_micro_batch in train_data_gen:
       if (
           self._training_config.max_steps
@@ -851,43 +851,6 @@ class AgenticRLLearner(abc.ABC, Generic[TConfig]):
             lambda *xs: jnp.concatenate(xs, axis=0), *train_micro_batch
         )
 
-      # --- Evaluation Logic ---
-      current_eval_dataset = None
-      current_train_step = self.rl_cluster.actor_trainer.train_steps
-      if (
-          all_eval_prompts
-          and current_train_step % training_config.eval_every_n_steps == 0
-          and current_train_step != self._last_eval_train_step
-      ):
-        self._last_eval_train_step = current_train_step
-        self._eval_iter_steps = 0
-        eval_orchestrator = self._build_orchestrator()
-
-        async def _eval_runner_async(current_eval_orchestrator):
-          eval_examples = []
-          async for batch in self._orchestrator_producer(
-              current_eval_orchestrator,
-              all_eval_prompts,
-              num_generations=self._num_generations(),
-          ):
-            eval_example = self._batch_to_train_example(
-                batch,
-                rl_cluster_lib.Mode.EVAL,
-            )
-            eval_examples.extend(eval_example)
-          return eval_examples
-
-        eval_future = asyncio.run_coroutine_threadsafe(
-            _eval_runner_async(eval_orchestrator), self.loop
-        )
-        eval_examples = eval_future.result()
-        self._eval_iter_steps += 1
-        current_eval_dataset = eval_examples
-        did_eval_this_global_step = True
-
-      # --- Training Step ---
-      iterations = self._num_iterations() if self._process_in_consumer else 1
-
       # When ``train_micro_batch_size < mini_batch_size`` we want the trainer
       # to invoke ``train_step`` multiple times per outer iteration so the
       # optimizer (which fires every ``gradient_accumulation_steps`` micro-
@@ -915,22 +878,78 @@ class AgenticRLLearner(abc.ABC, Generic[TConfig]):
       else:
         chunked_train_micro_batch = [merged_train_micro_batch]
 
-      for i in range(iterations):
-        if self._process_in_consumer and i > 0:
-          # TODO(b/483779605) Sub-step checkpointing.
-          self._iter_steps += 1
+      full_batch_chunks.extend(chunked_train_micro_batch)
 
-        self.rl_cluster.update_actor(
+      # --- Evaluation Logic on FIRST microbatch ---
+      current_eval_dataset = None
+      if micro_batches_since_last_sync == 0:
+        current_train_step = self.rl_cluster.actor_trainer.train_steps
+        if (
+            all_eval_prompts
+            and current_train_step % training_config.eval_every_n_steps == 0
+            and current_train_step != self._last_eval_train_step
+        ):
+          self._last_eval_train_step = current_train_step
+          self._eval_iter_steps = 0
+          eval_orchestrator = self._build_orchestrator()
+
+          async def _eval_runner_async(current_eval_orchestrator):
+            eval_examples = []
+            async for batch in self._orchestrator_producer(
+                current_eval_orchestrator,
+                all_eval_prompts,
+                num_generations=self._num_generations(),
+            ):
+              eval_example = self._batch_to_train_example(
+                  batch,
+                  rl_cluster_lib.Mode.EVAL,
+              )
+              eval_examples.extend(eval_example)
+            return eval_examples
+
+          eval_future = asyncio.run_coroutine_threadsafe(
+              _eval_runner_async(eval_orchestrator), self.loop
+          )
+          eval_examples = eval_future.result()
+          self._eval_iter_steps += 1
+          current_eval_dataset = eval_examples
+          did_eval_this_global_step = True
+
+      # --- First iteration Training Step (Parallelized with Rollout) ---
+      # Note: Suppose one full batch has m minibatches, each minibatch has n
+      # microbatches, and #iterations=K, we will:
+      #   1. Train on the m * n microbatches once as we get them from rollout.
+      #   2. When we get the full batch, repeat K-1 times on the entire batch.
+      self.rl_cluster.update_actor(
+          chunked_train_micro_batch, current_eval_dataset, skip_jit
+      )
+      if hasattr(self.rl_cluster, "critic_trainer"):
+        self.rl_cluster.update_critic(
             chunked_train_micro_batch, current_eval_dataset, skip_jit
         )
-        if hasattr(self.rl_cluster, "critic_trainer"):
-          self.rl_cluster.update_critic(
-              chunked_train_micro_batch, current_eval_dataset, skip_jit
-          )
 
-      # --- Weight Sync Logic ---
       micro_batches_since_last_sync += 1
+
       if micro_batches_since_last_sync == micro_batches_per_full_batch:
+        # --- Remaining Iterations Training Step ---
+        iterations = self._num_iterations()
+
+        for i in range(1, iterations):
+          # TODO(b/483779605) Sub-step checkpointing.
+          self._iter_steps += len(full_batch_chunks)
+
+          # TODO(yixuanm): Eval during iteration too. Skipping for now as we 
+          # will refactor the learner soon.
+          self.rl_cluster.update_actor(
+              full_batch_chunks, None, skip_jit
+          )
+          if hasattr(self.rl_cluster, "critic_trainer"):
+            self.rl_cluster.update_critic(
+                full_batch_chunks, None, skip_jit
+            )
+        full_batch_chunks.clear()
+
+        # --- Weight Sync Logic ---
         global_step_time = time.time() - self._global_step_start_time
         logging.info(
             f"Global step {self.rl_cluster.global_steps} completed in"
@@ -1016,6 +1035,7 @@ class AgenticRLLearner(abc.ABC, Generic[TConfig]):
             trainer_str,
             eval_str,
         )
+        did_eval_this_global_step = False
         self.rl_cluster.buffer_metrics_async(
             {"perf/global_step_time": (global_step_time, np.mean)},
             mode=rl_cluster_lib.Mode.TRAIN,

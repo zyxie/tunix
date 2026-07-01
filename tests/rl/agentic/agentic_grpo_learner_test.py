@@ -322,7 +322,7 @@ class AgenticGrpoLearnerTest(parameterized.TestCase):
       results.append(item)
 
     prompt_ids = [r.prompt_ids[0] for r in results]
-    self.assertEqual(prompt_ids, [0, 0, 0, 0, 1, 1, 1, 1])
+    self.assertEqual(prompt_ids, [0, 0, 1, 1])
 
   def test_grpo_config_validation(self):
     with self.assertRaisesRegex(
@@ -521,9 +521,11 @@ class AgenticGrpoLearnerTest(parameterized.TestCase):
       _, kwargs = mock_get_ref.call_args_list[0]
       self.assertEqual(kwargs["prompt_tokens"].shape[0], 4)
 
-      # For each batch of 4 trajectories, it does 2 iterations.
-      # So update_actor should be called 2 * 2 = 4 times!
-      self.assertEqual(mock_update_actor.call_count, 4)
+      # The full batch has 2 microbatches.
+      # First iteration parallelized: 2 calls (1 per microbatch).
+      # Remaining 1 iteration: 1 call (passing the full batch of 2 microbatches).
+      # Total: 3 calls.
+      self.assertEqual(mock_update_actor.call_count, 3)
 
   def test_compute_logps_chunk_size(self):
     vocab = test_common.MockVocab()
