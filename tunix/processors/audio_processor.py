@@ -187,8 +187,8 @@ def process_gemma4_inputs(
           padded_audio_lengths[b, i] = len(clip)
 
     processed_audios = gemma4_model_lib.PreprocessedAudioInput(
-        audios=padded_audios,
-        sequence_lengths=padded_audio_lengths,
+        audios=padded_audios,  # pyrefly: ignore[bad-argument-type]
+        sequence_lengths=padded_audio_lengths,  # pyrefly: ignore[bad-argument-type]
     )
 
   return processed_audios, expanded_token_batch

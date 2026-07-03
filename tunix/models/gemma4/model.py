@@ -428,11 +428,11 @@ class Embedder(nnx.Module):
     x = self.input_embedding[(x,)]
     x *= jnp.sqrt(x.shape[-1]).astype(x.dtype)
     x = jnp.astype(x, self.config.dtype)
-    x = shard(x, self.config.shd_config.act_btd)
+    x = shard(x, self.config.shd_config.act_btd)  # pyrefly: ignore[bad-argument-type]
     return x
 
   def encode_vision(self, x: jaxtyping.ArrayLike) -> jaxtyping.Array:
-    x = self.mm_pre_projection_norm(x)
+    x = self.mm_pre_projection_norm(x)  # pyrefly: ignore[bad-argument-type]
     x = self.mm_input_projection(x)
     return x
 
@@ -446,7 +446,7 @@ class Embedder(nnx.Module):
       self, x: jaxtyping.ArrayLike, t: jaxtyping.ArrayLike
   ) -> jaxtyping.Array:
     t = jnp.where(
-        jnp.logical_and(t >= 0, t < self.vocab_size), t, jnp.zeros_like(t)
+        jnp.logical_and(t >= 0, t < self.vocab_size), t, jnp.zeros_like(t)  # pyrefly: ignore[unsupported-operation]
     )
     x = self.per_layer_model_projection(x)
     x = jnp.reshape(
@@ -512,10 +512,10 @@ def _add_bidirectional_mask(
       pad_len = attn_kv_len - kv_shape[-1]
       kv_block_indices = jnp.pad(kv_block_indices, [(0, 0), (0, pad_len)])
     else:
-      kv_block_indices = kv_block_indices[..., -attn_kv_len:]
+      kv_block_indices = kv_block_indices[..., -attn_kv_len:]  # pyrefly: ignore[bad-index]
 
-  bidir_cond = (kv_block_indices[:, None, :] == q_block_indices[..., None]) & (
-      q_block_indices[..., None] > 0
+  bidir_cond = (kv_block_indices[:, None, :] == q_block_indices[..., None]) & (  # pyrefly: ignore[bad-index]
+      q_block_indices[..., None] > 0  # pyrefly: ignore[bad-index]
   )
 
   if len(attn_shape) == 4:
@@ -645,7 +645,7 @@ class RMSNorm(nnx.Module):
     self.with_scale = with_scale
     if with_scale:
       self.scale = nnx.Param(
-          nnx.initializers.ones_init()(rngs.params(), dim).astype(param_dtype),
+          nnx.initializers.ones_init()(rngs.params(), dim).astype(param_dtype),  # pyrefly: ignore[bad-argument-type]
           sharding=sharding.rms_norm_weight,
       )
     self.dtype = dtype
@@ -874,7 +874,7 @@ class Attention(nnx.Module):
     x = x.astype(self.config.dtype)
     seq_len = x.shape[1]
     query_proj = self.q_einsum(x)
-    query_proj = shard(query_proj, self.config.shd_config.act_btnh)
+    query_proj = shard(query_proj, self.config.shd_config.act_btnh)  # pyrefly: ignore[bad-argument-type]
     query_proj = self._query_norm(query_proj)
     query_proj = apply_rope(
         query_proj,
@@ -895,8 +895,8 @@ class Attention(nnx.Module):
       else:
         key_proj, value_proj = self.kv_einsum(x)
 
-      key_proj = shard(key_proj, self.config.shd_config.act_btnh)
-      value_proj = shard(value_proj, self.config.shd_config.act_btnh)
+      key_proj = shard(key_proj, self.config.shd_config.act_btnh)  # pyrefly: ignore[bad-argument-type]
+      value_proj = shard(value_proj, self.config.shd_config.act_btnh)  # pyrefly: ignore[bad-argument-type]
 
       # Apply norms to computed KV
       value_var = jnp.mean(jnp.square(value_proj), axis=-1, keepdims=True)
@@ -971,7 +971,7 @@ class Attention(nnx.Module):
       if self.attn_type == AttentionType.LOCAL_SLIDING:
         mask = mask_lib.LocalMask(
             (seq_len, seq_len),
-            window_size=(self.config.sliding_window_size - 1, 0),
+            window_size=(self.config.sliding_window_size - 1, 0),  # pyrefly: ignore[unsupported-operation]
             offset=0,
         )
       else:
@@ -1139,14 +1139,14 @@ class Attention(nnx.Module):
           # for decoding without sliding window cache
           sliding_mask = create_sliding_window_mask(
               attn_mask,
-              sliding_window_size=self.config.sliding_window_size,
+              sliding_window_size=self.config.sliding_window_size,  # pyrefly: ignore[bad-argument-type]
           )
           attn_mask = sliding_mask * attn_mask
         else:  # for prefill
           all_ones = jnp.ones_like(attn_mask)
           sliding_mask = jnp.triu(
-              all_ones, -1 * self.config.sliding_window_size + 1
-          ) * jnp.tril(all_ones, self.config.sliding_window_size - 1)
+              all_ones, -1 * self.config.sliding_window_size + 1  # pyrefly: ignore[unsupported-operation]
+          ) * jnp.tril(all_ones, self.config.sliding_window_size - 1)  # pyrefly: ignore[unsupported-operation]
           attn_mask = sliding_mask * attn_mask
 
       attn = jnp.where((jnp.expand_dims(attn_mask, -2)), logits, K_MASK)
@@ -1165,7 +1165,7 @@ class Attention(nnx.Module):
         encoded = jnp.einsum('BTNS,BSNH->BTNH', attn, value_proj)
 
     attn_output = self.attn_vec_einsum(encoded)
-    attn_output = shard(attn_output, self.config.shd_config.act_btd)
+    attn_output = shard(attn_output, self.config.shd_config.act_btd)  # pyrefly: ignore[bad-argument-type]
     return new_cache, attn_output, (key_proj, value_proj)
 
   @property
@@ -1213,18 +1213,18 @@ class Attention(nnx.Module):
 
     cache_shape = (batch_size, cache_len, self.num_kv_heads, self.head_dim)
     k = shard(
-        np.zeros(cache_shape, dtype),
-        self.config.shd_config.act_btnh,
+        np.zeros(cache_shape, dtype),  # pyrefly: ignore[bad-argument-type]
+        self.config.shd_config.act_btnh,  # pyrefly: ignore[bad-argument-type]
         eager=True,
     )
     v = shard(
-        np.zeros(cache_shape, dtype),
-        self.config.shd_config.act_btnh,
+        np.zeros(cache_shape, dtype),  # pyrefly: ignore[bad-argument-type]
+        self.config.shd_config.act_btnh,  # pyrefly: ignore[bad-argument-type]
         eager=True,
     )
     end_index = shard(
-        np.zeros((batch_size,), np.int32),
-        self.config.shd_config.act_btnh[:1],
+        np.zeros((batch_size,), np.int32),  # pyrefly: ignore[bad-argument-type]
+        self.config.shd_config.act_btnh[:1],  # pyrefly: ignore[bad-argument-type]
         eager=True,
     )
     return {'k': k, 'v': v, 'end_index': end_index}
@@ -1688,7 +1688,7 @@ class Gemma4(BackendMappingMixin, nnx.Module):
     else:
       soft_token_counts = vision_input.soft_token_counts
 
-    max_n_images = max((len(counts) for counts in soft_token_counts), default=0)
+    max_n_images = max((len(counts) for counts in soft_token_counts), default=0)  # pyrefly: ignore[bad-argument-type]
     if max_n_images == 0:
       return jnp.zeros((batch_size, 0, self.config.embed_dim))
 
@@ -1713,11 +1713,11 @@ class Gemma4(BackendMappingMixin, nnx.Module):
     for b in range(batch_size):
       per_image_tokens = []
       counts = soft_token_counts[b] if b < len(soft_token_counts) else ()
-      for i in range(len(counts)):
+      for i in range(len(counts)):  # pyrefly: ignore[bad-argument-type]
         idx = b * max_n_images + i
-        expected_count = counts[i]
+        expected_count = counts[i]  # pyrefly: ignore[bad-index]
         if mask is not None:
-          valid_indices = jnp.nonzero(mask[idx], size=expected_count)[0]
+          valid_indices = jnp.nonzero(mask[idx], size=expected_count)[0]  # pyrefly: ignore[bad-argument-type]
           real_tokens = embeddings[idx][valid_indices]
         else:
           real_tokens = embeddings[idx][:expected_count]

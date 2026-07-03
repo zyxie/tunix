@@ -423,7 +423,7 @@ def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
     })
 
   if cfg.audio_encoder is not None:
-    mapping.update({
+    mapping.update({  # pyrefly: ignore[no-matching-overload]
         # Audio Embedder
         r"(?:model\.)?embed_audio\.embedding_projection\.weight": (
             "embedder.audio_input_projection.w",

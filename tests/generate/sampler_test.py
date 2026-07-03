@@ -139,8 +139,8 @@ class SamplerTest(parameterized.TestCase):
             + 1
         )
         np.testing.assert_allclose(
-            result_not_padded.logits[i],
-            result_padded.logits[i][:valid_length],
+            result_not_padded.logits[i],  # pyrefly: ignore[unsupported-operation]
+            result_padded.logits[i][:valid_length],  # pyrefly: ignore[unsupported-operation]
         )
         np.testing.assert_allclose(
             result_not_padded.tokens[i],
@@ -197,7 +197,7 @@ class SamplerTest(parameterized.TestCase):
         return_logits=True,
         max_prompt_length=8,
         echo=True,
-        images=images,
+        images=images,  # pyrefly: ignore[bad-argument-type]
     )
 
     self.assertIsNotNone(result)
@@ -259,9 +259,9 @@ class SamplerTest(parameterized.TestCase):
     self.assertIsNotNone(result)
     self.assertLen(result.logits, 2)
     if echo:
-      self.assertEqual(result.logits[0].shape, (13, vocab.GetPieceSize()))
+      self.assertEqual(result.logits[0].shape, (13, vocab.GetPieceSize()))  # pyrefly: ignore[unsupported-operation]
     else:
-      self.assertEqual(result.logits[0].shape, (10, vocab.GetPieceSize()))
+      self.assertEqual(result.logits[0].shape, (10, vocab.GetPieceSize()))  # pyrefly: ignore[unsupported-operation]
 
     # With 1 beam, the beam search result should be the
     # same as the greedy output
@@ -438,7 +438,7 @@ class SamplerTest(parameterized.TestCase):
         input_strings, max_generation_steps=10, return_logits=True
     ).logits
     with self.assertRaises(AssertionError):
-      for orig, new in zip(original_logits, new_logits):
+      for orig, new in zip(original_logits, new_logits):  # pyrefly: ignore[bad-argument-type]
         np.testing.assert_allclose(orig, new, atol=1e-1, rtol=1e-1)
 
   def test_lora_state_update(self):
@@ -482,7 +482,7 @@ class SamplerTest(parameterized.TestCase):
         input_strings, max_generation_steps=10, return_logits=True
     ).logits
     with self.assertRaises(AssertionError):
-      for orig, new in zip(original_logits, new_logits):
+      for orig, new in zip(original_logits, new_logits):  # pyrefly: ignore[bad-argument-type]
         np.testing.assert_allclose(orig, new, atol=1e-1, rtol=1e-1)
 
   def test_invalid_state_update(self):
@@ -721,8 +721,8 @@ class SamplerTest(parameterized.TestCase):
     self.assertEqual(len(res_opt.tokens), len(res_unopt.tokens))
     for t_opt, t_unopt in zip(res_opt.tokens, res_unopt.tokens):
       np.testing.assert_array_equal(t_opt, t_unopt)
-    self.assertEqual(len(res_opt.logits), len(res_unopt.logits))
-    for l_opt, l_unopt in zip(res_opt.logits, res_unopt.logits):
+    self.assertEqual(len(res_opt.logits), len(res_unopt.logits))  # pyrefly: ignore[bad-argument-type]
+    for l_opt, l_unopt in zip(res_opt.logits, res_unopt.logits):  # pyrefly: ignore[bad-argument-type]
       self.assertEqual(l_opt.shape, l_unopt.shape)
       np.testing.assert_allclose(l_opt, l_unopt, atol=1e-5, rtol=1e-5)
 

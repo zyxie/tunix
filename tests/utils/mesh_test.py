@@ -106,7 +106,7 @@ class MeshUtilsTest(absltest.TestCase):
     ])
 
     self.assertEqual(
-        [[device.id for device in group] for group in grouped], [[0, 1], [2, 3]]
+        [[device.id for device in group] for group in grouped], [[0, 1], [2, 3]]  # pyrefly: ignore[not-iterable]
     )
 
   def test_group_devices_by_slice_treats_missing_metadata_as_one_slice(self):
@@ -121,7 +121,7 @@ class MeshUtilsTest(absltest.TestCase):
     ])
 
     self.assertEqual(
-        [[device.id for device in group] for group in grouped], [[0, 1]]
+        [[device.id for device in group] for group in grouped], [[0, 1]]  # pyrefly: ignore[not-iterable]
     )
 
   def test_partition_devices_by_host_groups_and_sorts_by_slice_then_host(self):
@@ -140,7 +140,7 @@ class MeshUtilsTest(absltest.TestCase):
     ])
 
     self.assertEqual(
-        [[device.id for device in group] for group in groups],
+        [[device.id for device in group] for group in groups],  # pyrefly: ignore[not-iterable]
         [[0], [1], [2], [3]],
     )
 
@@ -167,13 +167,13 @@ class MeshUtilsTest(absltest.TestCase):
 
     self.assertFalse(
         mesh.candidate_uses_whole_chips(
-            topology,
+            topology,  # pyrefly: ignore[bad-argument-type]
             [(0, 0, 0, 0), (1, 0, 0, 0)],
         )
     )
     self.assertTrue(
         mesh.candidate_uses_whole_chips(
-            topology,
+            topology,  # pyrefly: ignore[bad-argument-type]
             [(0, 0, 0, 0), (0, 0, 0, 1), (1, 0, 0, 0), (1, 0, 0, 1)],
         )
     )
@@ -194,7 +194,7 @@ class MeshUtilsTest(absltest.TestCase):
 
     self.assertTrue(
         mesh.candidate_uses_whole_chips(
-            topology,
+            topology,  # pyrefly: ignore[bad-argument-type]
             [(0, 0, 0)],
         )
     )
@@ -477,7 +477,7 @@ class MeshUtilsTest(absltest.TestCase):
     allocated, _ = mesh._allocate_devices_by_coords(fake_devices, 8)
 
     self.assertEqual(
-        [device.id for device in allocated], [0, 1, 4, 5, 8, 9, 12, 13]
+        [device.id for device in allocated], [0, 1, 4, 5, 8, 9, 12, 13]  # pyrefly: ignore[not-iterable]
     )
 
   def test_allocate_named_mesh_device_slices_prefers_coord_boxes(self):
@@ -537,7 +537,7 @@ class MeshUtilsTest(absltest.TestCase):
     allocated, _ = mesh._allocate_devices_by_coords(fake_devices, 8)
 
     self.assertEqual(
-        [device.id for device in allocated],
+        [device.id for device in allocated],  # pyrefly: ignore[not-iterable]
         [0, 1, 4, 5, 16, 17, 20, 21],
     )
 
@@ -573,7 +573,7 @@ class MeshUtilsTest(absltest.TestCase):
 
     allocated, _ = mesh._allocate_devices_by_coords(fake_devices, 4)
 
-    self.assertEqual([device.id for device in allocated], [0, 1, 2, 3])
+    self.assertEqual([device.id for device in allocated], [0, 1, 2, 3])  # pyrefly: ignore[not-iterable]
 
   def test_allocate_devices_by_coords_prefers_more_cubical_supported_shape(
       self,
@@ -595,7 +595,7 @@ class MeshUtilsTest(absltest.TestCase):
 
     allocated, _ = mesh._allocate_devices_by_coords(fake_devices, 256)
 
-    allocated_coords = [device.coords for device in allocated]
+    allocated_coords = [device.coords for device in allocated]  # pyrefly: ignore[not-iterable]
     mins = tuple(
         min(coords[dim] for coords in allocated_coords) for dim in range(3)
     )
@@ -687,7 +687,7 @@ class MeshUtilsTest(absltest.TestCase):
 
     self.assertEqual([device.id for device in actor_devices], [0, 1, 2, 3])
     self.assertEqual(
-        next_state.remaining_coord_regions_by_slice[0][0],
+        next_state.remaining_coord_regions_by_slice[0][0],  # pyrefly: ignore[unsupported-operation]
         mesh.CoordRegion((0, 1, 0, 0), (2, 1, 1, 2)),
     )
 
@@ -701,7 +701,7 @@ class MeshUtilsTest(absltest.TestCase):
     self.assertEqual([device.id for device in rollout_devices], [8, 9, 10, 11])
     self.assertNotIn(
         mesh.CoordRegion((0, 1, 0, 0), (2, 1, 1, 2)),
-        next_state.remaining_coord_regions_by_slice[0],
+        next_state.remaining_coord_regions_by_slice[0],  # pyrefly: ignore[unsupported-operation]
     )
 
   def test_allocate_devices_prefers_smallest_remaining_coord_region_first(self):

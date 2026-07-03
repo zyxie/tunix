@@ -390,13 +390,13 @@ class FFNBlock(nnx.Module):
     self.ffn_layer1 = ClippedEinsum(
         rngs=rngs,
         shape=(num_features, num_features * 4),
-        dtype=dtype,
+        dtype=dtype,  # pyrefly: ignore[bad-argument-type]
         param_dtype=param_dtype,
     )
     self.ffn_layer2 = ClippedEinsum(
         rngs=rngs,
         shape=(num_features * 4, num_features),
-        dtype=dtype,
+        dtype=dtype,  # pyrefly: ignore[bad-argument-type]
         param_dtype=param_dtype,
     )
     self.post_layer_norm = nnx.RMSNorm(
@@ -447,7 +447,7 @@ class LightweightConvBlock(nnx.Module):
     self.linear_start = ClippedEinsum(
         rngs=rngs,
         shape=(num_features, 2 * num_features),  # feature expansion for GLU.
-        dtype=dtype,
+        dtype=dtype,  # pyrefly: ignore[bad-argument-type]
         param_dtype=param_dtype,
     )
     self.depthwise_conv1d = nnx.Conv(
@@ -472,7 +472,7 @@ class LightweightConvBlock(nnx.Module):
     self.linear_end = ClippedEinsum(
         rngs=rngs,
         shape=(num_features, num_features),
-        dtype=dtype,
+        dtype=dtype,  # pyrefly: ignore[bad-argument-type]
         param_dtype=param_dtype,
     )
 
@@ -660,19 +660,19 @@ class LocalDotProductAttention(nnx.Module):
         rngs=rngs,
         shape=(model_dims, model_dims),
         param_dtype=param_dtype,
-        dtype=dtype,
+        dtype=dtype,  # pyrefly: ignore[bad-argument-type]
     )
     self.key = ClippedEinsum(
         rngs=rngs,
         shape=(model_dims, model_dims),
         param_dtype=param_dtype,
-        dtype=dtype,
+        dtype=dtype,  # pyrefly: ignore[bad-argument-type]
     )
     self.value = ClippedEinsum(
         rngs=rngs,
         shape=(model_dims, model_dims),
         param_dtype=param_dtype,
-        dtype=dtype,
+        dtype=dtype,  # pyrefly: ignore[bad-argument-type]
     )
 
     self.per_dim_scale = nnx.Param(jnp.ones(units_per_head, dtype=param_dtype))
@@ -951,7 +951,7 @@ class AttentionBlock(nnx.Module):
     self.post = ClippedEinsum(
         rngs=rngs,
         shape=(atten_num_heads, units_per_head, model_dims),
-        dtype=dtype,
+        dtype=dtype,  # pyrefly: ignore[bad-argument-type]
         param_dtype=param_dtype,
     )
 

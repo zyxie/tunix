@@ -134,7 +134,7 @@ def sample_top_p(
     return next_token, logp_sampled
 
   k = next_token_logits.shape[-1] if _no_topk else top_k
-  logits_sorted, indices = jax.lax.top_k(next_token_logits, k=k)
+  logits_sorted, indices = jax.lax.top_k(next_token_logits, k=k)  # pyrefly: ignore[bad-argument-type]
 
   probs_sorted = jax.nn.softmax(logits_sorted, axis=-1)
   cumsum_probs = jnp.cumsum(probs_sorted, axis=-1)
@@ -225,7 +225,7 @@ class Sampler(base_sampler.BaseSampler):
       self.tokenizer = tok_adapter.TokenizerAdapter(tokenizer)
     self.cache_config = cache_config
     self.image_processor = image_processor
-    self._transformer_graphdef: graph.NodeDef = nnx.graphdef(transformer)
+    self._transformer_graphdef: graph.NodeDef = nnx.graphdef(transformer)  # pyrefly: ignore[bad-assignment]
     self._transformer_state: list[statelib.State] = nnx.variables(transformer)
     self._flattened_transformer_state: list[statelib.State] = jax.tree.leaves(
         self._transformer_state,
@@ -260,7 +260,7 @@ class Sampler(base_sampler.BaseSampler):
 
   @property
   def transformer(self) -> nnx.Module:
-    return nnx.merge(
+    return nnx.merge(  # pyrefly: ignore[no-matching-overload]
         self._transformer_graphdef, self._flattened_transformer_state
     )
 
@@ -421,7 +421,7 @@ class Sampler(base_sampler.BaseSampler):
 
     if include_logits:
       logits_buffer = jnp.zeros(
-          (batch_size, total_sampling_steps, self.transformer.num_embed),
+          (batch_size, total_sampling_steps, self.transformer.num_embed),  # pyrefly: ignore[missing-attribute]
           dtype=jnp.float32,
       )
     else:
@@ -438,16 +438,16 @@ class Sampler(base_sampler.BaseSampler):
     sampling_mode = [None]
 
     if beam_size is not None:
-      utils.check_sampling_mode_conflict(sampling_mode, 'beam_search')
+      utils.check_sampling_mode_conflict(sampling_mode, 'beam_search')  # pyrefly: ignore[bad-argument-type]
       sampling_parameters['beam_size'] = beam_size
 
     if top_p is not None:
-      utils.check_sampling_mode_conflict(sampling_mode, 'top_p')
+      utils.check_sampling_mode_conflict(sampling_mode, 'top_p')  # pyrefly: ignore[bad-argument-type]
       sampling_parameters['top_p'] = top_p
       sampling_parameters['top_k'] = top_k
 
     if sampling_mode[0] is None:
-      sampling_mode[0] = 'greedy'
+      sampling_mode[0] = 'greedy'  # pyrefly: ignore[unsupported-operation]
 
     logging.debug('Using sampling mode: %s', sampling_mode[0])
 
@@ -504,7 +504,7 @@ class Sampler(base_sampler.BaseSampler):
           token_buffer=token_buffer,
           cache=cache,
           logits_buffer=logits_buffer,
-          state=beam_search_state,
+          state=beam_search_state,  # pyrefly: ignore[bad-argument-type]
           pad_token_id=eos[0],
           decoding_step=decoding_step,
           logprobs_buffer=logprobs_buffer,
@@ -526,7 +526,7 @@ class Sampler(base_sampler.BaseSampler):
             key,
             sampler_state.temperature,
             sampler_state.sampling_parameters['top_p'],
-            sampler_state.sampling_parameters['top_k'],
+            sampler_state.sampling_parameters['top_k'],  # pyrefly: ignore[bad-argument-type]
             return_logprobs=(logprobs_buffer is not None),
         )
       else:
@@ -601,7 +601,7 @@ class Sampler(base_sampler.BaseSampler):
           input_mask, self.cache_config.cache_size
       )
 
-    transformer = nnx.merge(self._transformer_graphdef, params)
+    transformer = nnx.merge(self._transformer_graphdef, params)  # pyrefly: ignore[no-matching-overload]
     kwargs = {}
     if images is not None:
       kwargs['images'] = images
@@ -714,7 +714,7 @@ class Sampler(base_sampler.BaseSampler):
         decoding_step, self.cache_config.cache_size, input_mask
     )
 
-    transformer = nnx.merge(self._transformer_graphdef, params)
+    transformer = nnx.merge(self._transformer_graphdef, params)  # pyrefly: ignore[no-matching-overload]
     logits, cache = transformer(
         last_token,
         positions=step_positions,
@@ -834,13 +834,13 @@ class Sampler(base_sampler.BaseSampler):
       assert self.transformer.vision_encoder is not None
       processed_images, tokens = image_processor.process_gemma4_inputs(
           images,
-          tokens,
+          tokens,  # pyrefly: ignore[bad-argument-type]
           self.transformer.vision_encoder,
           self.tokenizer.pad_id(),
       )
 
     elif images is not None and self.image_processor is not None:
-      processed_images = self.image_processor(images)
+      processed_images = self.image_processor(images)  # pyrefly: ignore[bad-argument-type]
       processed_images = jnp.array(processed_images)
 
     processed_audios = None
@@ -849,8 +849,8 @@ class Sampler(base_sampler.BaseSampler):
         assert hasattr(self.transformer, 'audio_encoder')
         assert self.transformer.audio_encoder is not None
         processed_audios, tokens = audio_processor.process_gemma4_inputs(
-            audios=audios,
-            tokens=tokens,
+            audios=audios,  # pyrefly: ignore[bad-argument-type]
+            tokens=tokens,  # pyrefly: ignore[bad-argument-type]
             audio_encoder=self.transformer.audio_encoder,
             max_audio_length=max_audio_length,
             max_audio_clips=max_audio_clips,
@@ -864,7 +864,7 @@ class Sampler(base_sampler.BaseSampler):
 
     all_input_ids = np.array([
         utils.pad_to_length(
-            x,
+            x,  # pyrefly: ignore[bad-argument-type]
             target_length=max_prompt_length,
             pad_value=self.tokenizer.pad_id(),
             left=True,
@@ -880,9 +880,9 @@ class Sampler(base_sampler.BaseSampler):
       )
 
     if seed is None:
-      seed = jax.random.PRNGKey(0)
+      seed = jax.random.PRNGKey(0)  # pyrefly: ignore[bad-assignment]
     elif isinstance(seed, int):
-      seed = jax.random.PRNGKey(seed)
+      seed = jax.random.PRNGKey(seed)  # pyrefly: ignore[bad-assignment]
     sampling_state = self.init_sample_state(
         jnp.array(all_input_ids),
         include_logits=return_logits,
@@ -891,7 +891,7 @@ class Sampler(base_sampler.BaseSampler):
         temperature=temperature,
         top_p=top_p,
         top_k=top_k,
-        seed=seed,
+        seed=seed,  # pyrefly: ignore[bad-argument-type]
         beam_size=beam_size,
         include_logprobs=return_logprobs,
     )

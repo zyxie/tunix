@@ -74,7 +74,7 @@ class Gemma4AudioProcessorTest(parameterized.TestCase):
     ]
 
     processed_audios, new_tokens = audio_processor.process_gemma4_inputs(
-        audios=audios,
+        audios=audios,  # pyrefly: ignore[bad-argument-type]
         tokens=tokens,
         audio_encoder=self.audio_encoder,
     )
@@ -120,7 +120,7 @@ class Gemma4AudioProcessorTest(parameterized.TestCase):
     ]
 
     proc_audios, new_tokens = audio_processor.process_gemma4_inputs(
-        audios=audios,
+        audios=audios,  # pyrefly: ignore[bad-argument-type]
         tokens=tokens,
         audio_encoder=self.audio_encoder,
     )
@@ -170,7 +170,7 @@ class Gemma4AudioProcessorTest(parameterized.TestCase):
     ]
 
     processed_audios, new_tokens = audio_processor.process_gemma4_inputs(
-        audios=audios,
+        audios=audios,  # pyrefly: ignore[bad-argument-type]
         tokens=tokens,
         audio_encoder=self.audio_encoder,
     )
@@ -225,7 +225,7 @@ class Gemma4AudioProcessorTest(parameterized.TestCase):
         ValueError, "Batch size of tokens.*does not match"
     ):
       audio_processor.process_gemma4_inputs(
-          audios=audios,
+          audios=audios,  # pyrefly: ignore[bad-argument-type]
           tokens=tokens,
           audio_encoder=self.audio_encoder,
       )
@@ -239,7 +239,7 @@ class Gemma4AudioProcessorTest(parameterized.TestCase):
         ValueError, "Placeholders provided for 2 clips, but only 1 provided"
     ):
       audio_processor.process_gemma4_inputs(
-          audios=audios,
+          audios=audios,  # pyrefly: ignore[bad-argument-type]
           tokens=tokens,
           audio_encoder=self.audio_encoder,
       )
@@ -255,7 +255,7 @@ class Gemma4AudioProcessorTest(parameterized.TestCase):
         ValueError, "A batch entry has more clips than the specified"
     ):
       audio_processor.process_gemma4_inputs(
-          audios=audios,
+          audios=audios,  # pyrefly: ignore[bad-argument-type]
           tokens=tokens,
           audio_encoder=self.audio_encoder,
           max_audio_clips=1,  # Limit to 1 clip

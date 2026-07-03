@@ -79,8 +79,8 @@ class RepeatIterable(Iterable[Any]):
 
     # Slice the rollout batch into mini-batches.
     for i in range(num_mini_batches):
-      start = i * self._mini_batch_size
-      end = start + self._mini_batch_size
+      start = i * self._mini_batch_size  # pyrefly: ignore[unsupported-operation]
+      end = start + self._mini_batch_size  # pyrefly: ignore[unsupported-operation]
       batch_indices = shuffled_indices[start:end]
 
       mini_batch = jtu.tree_map(
@@ -414,16 +414,16 @@ def compute_per_token_logps(
       )
       if return_entropy:
         per_token_entropy = jnp.pad(
-            per_token_entropy, ((0, 0), (1, 0)), constant_values=0.0
+            per_token_entropy, ((0, 0), (1, 0)), constant_values=0.0  # pyrefly: ignore[unbound-name]
         )
 
     if stop_gradient:
       per_token_logps = jax.lax.stop_gradient(per_token_logps)
       if return_entropy:
-        per_token_entropy = jax.lax.stop_gradient(per_token_entropy)
+        per_token_entropy = jax.lax.stop_gradient(per_token_entropy)  # pyrefly: ignore[unbound-name]
 
     if return_entropy:
-      return per_token_logps, per_token_entropy
+      return per_token_logps, per_token_entropy  # pyrefly: ignore[unbound-name]
     return per_token_logps
   else:
     logits = outputs[:, -logits_to_keep - 1 : -1, :]
@@ -769,4 +769,4 @@ def _check_get_norm(
     raise ValueError(
         f"Invalid 'norm' value: {norm}. Must be a positive number."
     )
-  return norm
+  return norm  # pyrefly: ignore[bad-return]

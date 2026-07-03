@@ -299,7 +299,7 @@ def infer_core_on_chip_count(devices: Sequence[Any]) -> int | None:
 
   if min_core is None:
     return None
-  return max_core - min_core + 1
+  return max_core - min_core + 1  # pyrefly: ignore[unsupported-operation]
 
 
 def summarize_devices_for_logging(
