@@ -184,6 +184,8 @@ class HyperParameters:
   a command-line argument or override file.
   """
 
+  config: collections.OrderedDict[str, Any]
+
   def __init__(self, argv: list[str], **kwargs):
     # Use omegaconf.OmegaConf.from_cli to capture CLI arguments.
 
@@ -472,7 +474,7 @@ class HyperParameters:
     supported_sources = collections.defaultdict(
         lambda: ["huggingface", "internal", "maxtext"]
     )
-    # TODO(b/467448875): Add support for other sources, such as kaggle for other
+    # TODO: b/467448875 - Add support for other sources, such as kaggle for other
     # models.
     supported_sources["gemma"] = ["kaggle", "internal", "maxtext"]
     supported_sources["gemma2"] = ["kaggle", "internal", "maxtext"]
