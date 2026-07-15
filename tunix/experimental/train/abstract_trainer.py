@@ -58,31 +58,31 @@ class AbstractTrainer(abc.ABC):
     )
 
   @abc.abstractmethod
-  def compile(self) -> None:
-    """Builds the step functions and shards optimizer state.
+  def compile(self, dummy_data: Any) -> None:
+    """Triggers JAX compilation. `with_loss_fn` must be called first.
 
     Idempotent; safe to call multiple times. Under JAX jit semantics, XLA
     compilation itself still happens on the first call per input shape; this
     method constructs the jitted callables and applies optimizer sharding so
     the first step avoids double compilation. Does NOT restore checkpoints.
+    Args:
+      dummy_data: A dummy batch of data to trigger compilation.
     """
     raise NotImplementedError(
         f"{type(self).__name__} does not implement compile."
     )
 
   @abc.abstractmethod
-  def fwd_bwd(self, inputs: Any, **kwargs) -> Any:
-    """Executes one forward/backward pass and accumulates gradients.
+  def fwd_bwd(self, payload: Any, **kwargs) -> None:
+    """Executes forward and backward passes.
 
+    Metrics are cached to overlap train steps.
     Does NOT apply an optimizer update; gradients are accumulated internally
     until `update()` is called. Gradient accumulation is therefore
     caller-driven: one `update()` per N `fwd_bwd()` calls.
     Args:
-      inputs: A raw training batch.
+      payload: A packed micro-batch ready for gradient descent.
       **kwargs: Implementation-specific options.
-    Returns:
-      Implementation-defined step outputs (e.g. loss, aux, grad norm) as
-      device arrays.
     """
     raise NotImplementedError(
         f"{type(self).__name__} does not implement fwd_bwd."
@@ -103,62 +103,57 @@ class AbstractTrainer(abc.ABC):
     )
 
   @abc.abstractmethod
-  def eval_step(self, inputs: Any, **kwargs) -> Any:
-    """Executes a forward-only evaluation step.
+  def eval_step(self, payload: Any, **kwargs) -> None:
+    """Executes one evaluation step on the given payload.
 
     Must not mutate any trainer state, including gradient accumulation
     buffers.
     Args:
-      inputs: A raw batch.
+      payload: A packed micro-batch ready for evaluation.
       **kwargs: Implementation-specific options.
-    Returns:
-      Implementation-defined evaluation outputs.
     """
     raise NotImplementedError(
         f"{type(self).__name__} does not implement eval_step."
     )
 
   @abc.abstractmethod
-  def save_checkpoint(self, path: Optional[str] = None, **kwargs) -> str:
-    """Serializes the current model and optimizer state now.
+  def save_checkpoint(self, metadata: Any, **kwargs) -> None:
+    """Force the trainer to serialize its state (model + optimizer).
 
     Checkpoint cadence/policy is the caller's responsibility.
     Args:
-      path: Destination. If None, the implementation's configured default
-        location is used.
+      metadata: The metadata pytree to save alongside the checkpoint.
       **kwargs: Implementation-specific options.
-    Returns:
-      The path the checkpoint was written to.
     """
     raise NotImplementedError(
         f"{type(self).__name__} does not implement save_checkpoint."
     )
 
   @abc.abstractmethod
-  def restore_checkpoint(self, path: str, **kwargs) -> int:
-    """Restores model and optimizer state from disk.
+  def restore_checkpoint(self, **kwargs) -> Any:
+    """Restore state from latest checkpoint and return the metadata pytree.
 
+    The metadata is the same as what is used on save_checkpoint.
     Args:
-      path: The checkpoint to restore.
       **kwargs: Implementation-specific options.
+
     Returns:
-      The restored global step.
+      The restored metadata pytree (global_step, etc.).
     """
     raise NotImplementedError(
         f"{type(self).__name__} does not implement restore_checkpoint."
     )
 
   @abc.abstractmethod
-  def prepare_weight_sync(self, **kwargs) -> Any:
-    """Stages weights for transfer and returns coordinates/metadata.
+  def prepare_weight_sync(self, **kwargs) -> None:
+    """Stages weights for transfer and returns coordinates/metadata for Rollouts to pull.
 
+    For a Raiden based implementation, trigger the d2h weight transfer here.
     Args:
       **kwargs: Implementation-specific options.
-    Returns:
-      Coordinates/metadata for Rollouts to pull.
     """
     raise NotImplementedError(
-        f"{type(self).__name__} does not implement get_weights."
+        f"{type(self).__name__} does not implement prepare_weight_sync."
     )
 
   @abc.abstractmethod
