@@ -449,7 +449,12 @@ DO_MEM_PROFILING = args.do_mem_profiling
 
 # ====== Rollout ======
 ROLLOUT_ENGINE = args.rollout_engine
-CKPT_DIR = args.ckpt_dir
+CKPT_DIR = (
+    args.ckpt_dir
+    if args.ckpt_dir and args.ckpt_dir.lower() not in ("none", "null")
+    else None
+)
+
 
 # Max number of sequences to be processed in parallel by vllm.
 VLLM_MAX_NUM_SEQS = ROLLOUT_MICRO_BATCH_SIZE * NUM_GENERATIONS
@@ -658,9 +663,13 @@ dataset = dataset.map(
 # ==========================================
 # 9. Optimizer & Checkpointing
 # ==========================================
-checkpointing_options = ocp.CheckpointManagerOptions(
-    save_interval_steps=SAVE_INTERVAL_STEPS, max_to_keep=MAX_TO_KEEP
-)
+if CKPT_DIR:
+  checkpointing_options = ocp.CheckpointManagerOptions(
+      save_interval_steps=SAVE_INTERVAL_STEPS, max_to_keep=MAX_TO_KEEP
+  )
+else:
+  checkpointing_options = None
+
 
 metrics_logging_options = metrics_logger.MetricsLoggerOptions(
     log_dir=args.metric_logger_dir, flush_every_n_steps=2
@@ -758,8 +767,8 @@ cluster_config = rl_cluster_lib.ClusterConfig(
         compute_logps_micro_batch_size=COMPUTE_LOGPS_MICRO_BATCH_SIZE,
         rollout_micro_batch_size=ROLLOUT_MICRO_BATCH_SIZE,
         metrics_logging_options=metrics_logging_options,
-        checkpoint_root_directory=None,
-        checkpointing_options=None,
+        checkpoint_root_directory=CKPT_DIR,
+        checkpointing_options=checkpointing_options,
         # optimizer_offload=OPTIMIZER_OFFLOAD,
     ),
     rollout_config=rollout_engine_config,
@@ -824,6 +833,7 @@ agentic_grpo_learner = agentic_grpo_learner.GRPOLearner(
 dataset = dataset.shuffle(seed=SEED)
 grain_dataset = grain.MapDataset.source(dataset)  # pyrefly: ignore[bad-argument-type]
 
+
 def mixed_type_batch_fn(elements):
   """elements: A list of dicts."""
   batched_data = {}
@@ -884,6 +894,9 @@ try:
       "train_mesh_fsdp": train_fsdp,
       "train_mesh_sp": train_sp,
       "train_mesh_tp": train_tp,
+      "checkpoint_root_directory": CKPT_DIR,
+      "save_interval_steps": SAVE_INTERVAL_STEPS,
+      "max_to_keep": MAX_TO_KEEP,
   }
   wandb.init(
       project="tunix", name=run_name, config=wandb_config, settings=settings
